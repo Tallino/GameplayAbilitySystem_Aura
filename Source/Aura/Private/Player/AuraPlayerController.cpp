@@ -4,10 +4,51 @@
 #include "Player/AuraPlayerController.h"
 #include "EnhancedInputSubsystems.h"
 #include "EnhancedInputComponent.h"
+#include "Interaction/EnemyInterface.h"
 
 AAuraPlayerController::AAuraPlayerController()
 {
 	bReplicates = true;
+}
+
+void AAuraPlayerController::PlayerTick(float DeltaSeconds)
+{
+	Super::PlayerTick(DeltaSeconds);
+
+	CursorTrace();
+}
+
+void AAuraPlayerController::CursorTrace()
+{
+	FHitResult CursorHit;
+	GetHitResultUnderCursor(ECC_Visibility, false, CursorHit);
+	if (!CursorHit.bBlockingHit) return;
+
+	LastActor = ThisActor;
+	ThisActor = Cast<IEnemyInterface>(CursorHit.GetActor());
+
+	if (LastActor == nullptr)
+	{
+		if (ThisActor != nullptr)
+		{
+			ThisActor->HighlightActor();
+		}
+	}
+	else
+	{
+		if (ThisActor == nullptr)
+		{
+			LastActor->UnHighlightActor();
+		}
+		else
+		{
+			if (LastActor != ThisActor)
+			{
+				LastActor->UnHighlightActor();
+				ThisActor->HighlightActor();
+			}
+		}
+	}
 }
 
 void AAuraPlayerController::BeginPlay()
@@ -28,11 +69,6 @@ void AAuraPlayerController::BeginPlay()
 	InputModeData.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
 	InputModeData.SetHideCursorDuringCapture(false);
 	SetInputMode(InputModeData);
-}
-
-void AAuraPlayerController::Tick(float DeltaSeconds)
-{
-	Super::Tick(DeltaSeconds);
 }
 
 void AAuraPlayerController::SetupInputComponent()
