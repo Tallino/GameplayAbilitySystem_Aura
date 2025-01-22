@@ -26,6 +26,7 @@ protected:
 	UPROPERTY()
 	TObjectPtr<UAbilitySystemComponent> AbilitySystemComponent;
 
+	//AttributeSet on PlayerState is for controlled pawns
 	UPROPERTY()
 	TObjectPtr<UAttributeSet> AttributeSet;
 };

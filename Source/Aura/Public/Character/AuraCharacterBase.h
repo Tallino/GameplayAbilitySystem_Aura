@@ -27,7 +27,8 @@ protected:
 
 	UPROPERTY()
 	TObjectPtr<UAbilitySystemComponent> AbilitySystemComponent;
-	
+
+	//AttributeSet on AuraCharacterBase is for the AI controlled enemies
 	UPROPERTY()
 	TObjectPtr<UAttributeSet> AttributeSet;
 };
