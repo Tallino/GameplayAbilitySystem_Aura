@@ -18,6 +18,8 @@ AAuraCharacter::AAuraCharacter()
 	bUseControllerRotationRoll = false;
 	bUseControllerRotationYaw = false;
 }
+
+// Called right after replication of PlayerState (note: our ACS is on the PlayerState)
 void AAuraCharacter::OnRep_PlayerState()
 {
 	Super::OnRep_PlayerState();
@@ -28,17 +30,21 @@ void AAuraCharacter::OnRep_PlayerState()
 
 void AAuraCharacter::InitAbilityActorInfo()
 {
-	// Init ability actor info for the Server
 	AAuraPlayerState* AuraPlayerState = GetPlayerState<AAuraPlayerState>();
 	check(AuraPlayerState);
+	
 	AuraPlayerState->GetAbilitySystemComponent()->InitAbilityActorInfo(AuraPlayerState, this);
+	
 	AbilitySystemComponent = AuraPlayerState->GetAbilitySystemComponent();
 	AttributeSet = AuraPlayerState->GetAttributeSet();
 }
 
+// Called when this Pawn is possessed. Only called on the server (or in standalone).
 void AAuraCharacter::PossessedBy(AController* NewController)
-{
+{	
 	Super::PossessedBy(NewController);
+
+	// Init ability actor info for the Server
 	InitAbilityActorInfo();
 
 }
