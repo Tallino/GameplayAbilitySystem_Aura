@@ -12,7 +12,7 @@
 AAuraCharacter::AAuraCharacter()
 {
 	// Remember: the code for the idle/running animation states is in BP
-	
+
 	GetCharacterMovement()->bOrientRotationToMovement = true;
 	GetCharacterMovement()->RotationRate = FRotator(0.f, 400.f, 0.f);
 	GetCharacterMovement()->bConstrainToPlane = true;
@@ -51,14 +51,9 @@ void AAuraCharacter::InitAbilityActorInfo()
 
 // Called when this Pawn is possessed. Only called on the server (or in standalone).
 void AAuraCharacter::PossessedBy(AController* NewController)
-{	
+{
 	Super::PossessedBy(NewController);
 
 	// Init ability actor info for the Server
 	InitAbilityActorInfo();
-
 }
-
-
-
-
