@@ -31,4 +31,6 @@ protected:
 	//AttributeSet on AuraCharacterBase is for the AI controlled enemies
 	UPROPERTY()
 	TObjectPtr<UAttributeSet> AttributeSet;
+
+	virtual void InitAbilityActorInfo();
 };
