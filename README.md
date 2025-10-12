@@ -63,4 +63,4 @@
    - So our MMC classes, inheriting from GameplayModMagnitudeCalculation, are created for both MaxHealth and MaxMana. In the constructor we capture the DEFINITION of the attribute on what they are based on (e.g. Vigor for MaxHealth, Intelligence for MaxMana). Inherited function called CalculateBaseMagnitude_Implementation() is automatically called, and we fill it in with all the information to get the attribute's value and use it as a modifier (together with the Level) for MaxHealth/Mana, and the result finally returned. Remember to set in the editor the attribute's "Magnitude Calculation Type" to "Custom Class Calculation" (in the GE), and finally set the Calculation Class to the MMC classes.
    
 9. Attribute Menu
-   - 
+   - We now design our Attribute Menu. We will have: WBP_AttributeMenu, WBP_FramedValue, WBP_TextValueRow, and WBP_TextValueButtonRow (where we can add attribute points to our PRIMARY attributes)
