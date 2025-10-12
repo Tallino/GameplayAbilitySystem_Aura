@@ -1,7 +1,6 @@
 1. Introduction
 	- Introduction to the Course.
 
-
 2. Project Creation
 	- Setup inheritance: AuraCharacterBase is base class, AuraCharacter and AuraEnemy are inherited.
 	- 2 different type of enemy (with different animations): Goblin slingshots and Goblin Spearmen.
@@ -9,7 +8,6 @@
 	- Enhanced Input (IMC file) used in AuraPlayerController. It is stored in IMC file (Input Mapping Context). D keybind is negated A, same for Y axis (Swizzle) etc.
 	- Move function is bound to Enhanced Input Component at startup time (SetupInputComponent). Binding to MoveAction (of type UInputAction), then used in the editor with the same name.
 	- EnemyInterface abstract class is given to all enemies to inherit from. From the Player Controller, at each tick, we call CursorTrace(), checking the HitResult under the cursor trace. If the actor hit is inheriting the interface (checked with a cast), then we highlight the actor (or unhighlight) with a LastActor/ThisActor logic.
-
 
 3. Intro to the Gameplay Ability System
 	- Enemies have the Ability System Component and AttributeSet directly on the character class, but for the player it is kept on the PlayerState (so it is not lost when the player dies).
@@ -19,11 +17,9 @@
 	- InitAbilityActorInfo must be done after possession: for players ASC lives on PlayerState, so make sure that PlayerState is valid and Controller has been set. Server calls it inside PossessedBy function, client inside OnRep_PlayerState function (a rep notifier i.e. a function being called as a result of something being replicated); for enemies ASC lives on pawn, so call it inside BeginPlay.
 	- For Mixed Replication mode, the OwnerActor's Owner must be the Controller. For pawns, this is set automatically in PossessedBy(). The PlayerState's Owner is automatically set to the Controller. So if your OwnerActor is not the PlayerState, and you used Mixed Replication mode, you must call SetOwner() on the OwnerActor to set its owner to the Controller.
 
-
 4. Attributes
 	- FGameplayAttributeData is the type for attributes. Inside OnRep_Health (notifier), we call the macros in charge of notifying the AS (GAMEPLAYATTRIBUTE_REPNOTIFY). To mark a variable as replicated, the function in charge is GetLifetimeReplicatedProps. Inside here, we call DOREPLIFETIME_CONDITION_NOTIFY macro.
 	- ATTRIBUTE_ACCESSORS is a container macro for defining several accessor macros, for easily initting, setting and getting the attributes (with Init/Get/Set<AttributeName>).
-
 
 5. RPG Game UI
 	- UI uses MVC design pattern. The View is the widget, the controller is Widget controller and the Model is the data. The controller is in charge of transmitting data to the view, but also of transmitting button presses from the view to the data. It can also have algorithmic logic inside. One way dependency: so the widget's depend on the controller (controller doesnt need to know which widget are receiving data broadcast to them), and the controller depends on the model (controller doesn't need to know the widget that the system has).
@@ -31,7 +27,6 @@
 	- AuraWidgetController is the mother class, OverlayWidgetController is inherited. All widget controllers have a struct containing pointers to PlayerController, PlayerState, AbilitySystemComponent and AttributeSet.
 	- To change Health/Mana in the view we use callbacks (delegates). The Broadcast function triggers the delegate, and calls all functions that have been bound to that delegate (through AddLambda). Remember that the MACRO is necessary to define the custom TYPE of your delegate, and then you define it's instances.
 	- When we call OnAttributeChanged.Broadcast as a callback for when a GameplayAttribute changes, the trigger for the actual change of the view is made in blueprint (event graph of the WBP).
-
 
 6. Gameplay Effects
 	- Gameplay Effects (GE) change attributes through modifiers. They can be instant, (have a) duration, infinite, or periodic (treated like instant, permanently changing the Base value), and they can stack. Instant applies its modifiers immediately, once, then expires; Infinite applies and persists indefinitely until explicitly removed (by another effect, an ability ending, or a tag condition); Duration applies for a fixed amount of time, then automatically expires. Periodic executes its effect repeatedly at intervals (ticks) during its active time.
@@ -63,6 +58,9 @@
    - Initialization of attributes can be applied either through DTs or GEs. Through DTs, we create a DT (with row structure = AttributeMetaData), with AuraAttributeSet.X as rows (X being the attribute), and then assign the DT to the exposed ASC in the editor of AuraPlayerState, section AttributeTest -> Default Starting Data. Through GEs, we self-apply GE_AuraPrimaryAttributes in our CharacterBase at startup time (InitializePrimaryAttribute function called in InitAbilityActorInfo). Our preferred way is with GE and that's how we will initialize our attributes.
    - We always used Scalable Floats as modifiers, but now we want to use Attribute Based: they are based on other attributes, so these are effects that can modify an attribute (adding/subtracting etc.) based on the value of other attributes (GE -> Modifiers -> Index -> Modifier Magnitude -> Attribute Based Magnitude -> Backing Attribute. Order of modifiers is important, as it will be the order in which they will be applied..... especially if we use multiply/divide!
    - Thanks to coefficients, for each modifier (index), we can flexibly manipulate the values of each modifier before they get summed/subtracted etc. to other modifiers. Specifically, just above "Backing Attribute" subsection, we can find Pre Multiply Additive Value (which is summed to the attribute BEFORE the coefficient multiplication), the coefficient itself (which is multiplied to the attribute), and Post Multiply Additive Value (which is summed to the attribute AFTER the coefficient multiplication).
-   - Derived attributes are attributes that DEPEND on other attributes (i.e. secondary attributes, mainly depending on the primary ones)... so that means that primary attributes may apply effects/increase/decrease secondary attributes. We now therefore have 3 division of attributes: Primary, Secondary and Vital (Health and Mana). Secondary Attributes get initialized via a self-applied GE at startup time, just like we do for the primary ones. Same for Vital Attributes.
+   - Derived attributes are attributes that DEPEND on other attributes (i.e. secondary attributes, mainly depending on the primary ones)... so that means that primary attributes may apply effects/increase/decrease secondary attributes. We now therefore have 3 division of attributes: Primary, Secondary and Vital (Health and Mana). Secondary Attributes get initialized via a self-applied GE at startup time, just like we do for the primary ones. Same for Vital Attributes, which are initialized last as they depend on MaxHealth and MaxMana (secondary attributes)
    - Modifier Magnitude Calculation (MMC) is a class we create when we want to base our attributes not only on other attributes, but on other entities (in our case, such as the Level, in the PlayerState). We want our MMC (custom calculation) be non-dependant on classes, instead dependent on interfaces (ICombatInterface). All actors who combat can inherit from this interface, where anyone can GetPlayerLevel from it. So Level is on PlayerState for the character, and on the Enemy class for the Enemy. They both inherit from the ICombatInterface, and return their one implementation of GetPlayerLevel.
-   - So our MMC classes, inheriting from GameplayModMagnitudeCalculation, are created for both MaxHealth and MaxMana. In the constructor we capture the DEFINITION of the attribute on what they are based on (e.g. Vigor for MaxHealth, Intelligence for MaxMana). Inherited function called CalculateBaseMagnitude_Implementation() is automatically called, and we fill it in with all the information to get the attribute's value and use it as a modifier (together with the Level) for MaxHealth/Mana, and the result finally returned. Remember to set in the editor the attribute's "Magnitude Calculation Type" to "Custom Class Calculation" (in the GE), and finally set the Calculation Class to the MMC classes. 
+   - So our MMC classes, inheriting from GameplayModMagnitudeCalculation, are created for both MaxHealth and MaxMana. In the constructor we capture the DEFINITION of the attribute on what they are based on (e.g. Vigor for MaxHealth, Intelligence for MaxMana). Inherited function called CalculateBaseMagnitude_Implementation() is automatically called, and we fill it in with all the information to get the attribute's value and use it as a modifier (together with the Level) for MaxHealth/Mana, and the result finally returned. Remember to set in the editor the attribute's "Magnitude Calculation Type" to "Custom Class Calculation" (in the GE), and finally set the Calculation Class to the MMC classes.
+   
+9. Attribute Menu
+   - 
