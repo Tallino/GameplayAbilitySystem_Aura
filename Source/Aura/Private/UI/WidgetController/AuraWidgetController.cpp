@@ -9,7 +9,6 @@ void UAuraWidgetController::SetWidgetControllerParams(const FWidgetControllerPar
 	PlayerState = WCParams.PlayerState;
 	AbilitySystemComponent = WCParams.AbilitySystemComponent;
 	AttributeSet = WCParams.AttributeSet;
-	
 }
 
 void UAuraWidgetController::BroadcastInitialValues()
@@ -18,5 +17,4 @@ void UAuraWidgetController::BroadcastInitialValues()
 
 void UAuraWidgetController::BindCallbacksToDependencies()
 {
-	
 }
