@@ -17,18 +17,18 @@ void UTargetDataUnderMouse::Activate()
 
 	if (bIsLocallyControlled)
 	{
-		SendMouseCursorData();
+		SendTargetDataToServer();
 	}
 	else
 	{
-		//TODO: We are on the server, so listen for target data.
+		ReceiveTargetDataFromClient();
 	}
 }
 
-void UTargetDataUnderMouse::SendMouseCursorData()
+void UTargetDataUnderMouse::SendTargetDataToServer()
 {
 	FScopedPredictionWindow ScopedPrediction(AbilitySystemComponent.Get());
-	
+
 	APlayerController* PC = Ability->GetCurrentActorInfo()->PlayerController.Get();
 	FHitResult CursorHit;
 	PC->GetHitResultUnderCursor(ECC_Visibility, false, CursorHit);
@@ -42,6 +42,34 @@ void UTargetDataUnderMouse::SendMouseCursorData()
 	                                                      DataHandle, FGameplayTag(),
 	                                                      AbilitySystemComponent->ScopedPredictionKey);
 
+	if (ShouldBroadcastAbilityTaskDelegates())
+	{
+		ValidData.Broadcast(DataHandle);
+	}
+}
+
+void UTargetDataUnderMouse::ReceiveTargetDataFromClient()
+{
+	const FGameplayAbilitySpecHandle SpecHandle = GetAbilitySpecHandle();
+	const FPredictionKey ActivationPredictionKey = GetActivationPredictionKey();
+
+	// We bind to callback, if data has not yet arrived, no problem, we wait
+	AbilitySystemComponent.Get()->AbilityTargetDataSetDelegate(SpecHandle, ActivationPredictionKey)
+						  .AddUObject(this, &UTargetDataUnderMouse::OnTargetDataReplicatedCallback);
+
+	//Instead, if the data have already been received before we could bind, if so, it will re-broadcast the delegate, so we can get our callback finally executed.
+	const bool bCalledDelegate = AbilitySystemComponent.Get()->CallReplicatedTargetDataDelegatesIfSet(SpecHandle, ActivationPredictionKey);
+
+	if (!bCalledDelegate)
+	{
+		SetWaitingOnRemotePlayerData();
+	}
+}
+
+void UTargetDataUnderMouse::OnTargetDataReplicatedCallback(const FGameplayAbilityTargetDataHandle& DataHandle,
+                                                           FGameplayTag ActivationTag)
+{
+	AbilitySystemComponent->ConsumeClientReplicatedTargetData(GetAbilitySpecHandle(), GetActivationPredictionKey());
 	if (ShouldBroadcastAbilityTaskDelegates())
 	{
 		ValidData.Broadcast(DataHandle);
