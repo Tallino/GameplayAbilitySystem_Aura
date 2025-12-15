@@ -212,16 +212,117 @@ GAS separates two critical actor references:
 
 ---
 
-6. Gameplay Effects
-	- Gameplay Effects (GE) change attributes through modifiers. They can be instant, (have a) duration, infinite, or periodic (treated like instant, permanently changing the Base value), and they can stack. Instant applies its modifiers immediately, once, then expires; Infinite applies and persists indefinitely until explicitly removed (by another effect, an ability ending, or a tag condition); Duration applies for a fixed amount of time, then automatically expires. Periodic executes its effect repeatedly at intervals (ticks) during its active time.
-    - GESpec (specification) tells us what UGameplayEffect (const data), what level and who instigated. GESpecHandle allows blueprints to generate a GameplayEffectSpec once and then reference it by handle, to apply it multiple times/multiple targets.
-    - GEContext is a Data structure that stores an instigator and related data, such as positions and targets. Games can subclass this structure and add game-specific information. It is passed throughout effect execution, so it is a great place to track transient information about an execution. GEContextHandle wraps a FGameplayEffectContext or subclass, to allow it to be polymorphic and replicate properly.
-    - In GE blueprint in the editor, section Gameplay Effect/Modifiers is where you select what attribute to modify from the AttributeSet of the Target
-    - Stacking: Aggregate by Source (how many stacks that source specifically already applied in general): so a difference source could apply other stacks, and the counter would start from 0 again; Aggregate by Target (how many stacks has the target received, independently if they are from difference sources)
-	- AuraAffectActor is a class attached to any actor able to apply a (Gameplay) effect to other actors overlapping with it (usually objects, potions, colliders etc.). Policies (coded as ENUMS) decide how the AuraEffectActor will apply or remove the effects, and are set into the editor. They are kept to None/Don't Apply for the type of effects that are not the ones we mean the actor to apply. We call OnOverlap/EndOverlap in blueprint, and trigger the case (in C++) based on the policy, which in turn calls ApplyEffectToTarget with the correct parameters.
-	- PreAttributeChange enforces clamping to avoid Health going in negative etc., and is triggered by changes to Attributes (Attribute Accessors, Gameplay Effects etc.), but executed before that attribute actually changes. It does NOT permanently change the modifier, just the value returned from querying the modifier. Later operations recalculate the Current Value from all modifiers, so we might need to clamp again.
-	- PostGameplayEffectExecute is an overriden function triggered after a gameplay effect changes an attribute, and it is incredibly useful as its paramater Data contains a lot of useful properties from both Source and Target of the GE. We indeed use this function to gather this information and store into the FEffectPropertiesEnhanced struct. This wrapper struct has different shared pointers (based on Source/Target Properties) to the FEffectProperties struct, which is where we finally store pointers to all the info we ultimately care about. Finally, we clamp again the Health and Mana (to MaxHealth and MaxMana). 
-	- Curve Tables (CT, found in miscellaneous) is like an Excel spreadsheet, where we decide how to scale the floats that regulate the intensity of how much a GE applies, based on the object level. We can then view this grid of level/effect intensity (row/column) in a graph view. We do this for both HealingCurve and ManaCurve.
+## Gameplay Effects (GE)
+
+### Core Gameplay Effect Types
+
+**Purpose**: Gameplay Effects are GAS's primary mechanism for modifying attributes through a data-driven approach.
+
+**Duration Types**:
+- **Instant**: Applies modifiers once immediately, then expires. Permanently modifies Base value
+- **Duration**: Applies for a fixed time period, then automatically expires
+- **Infinite**: Persists indefinitely until explicitly removed (by another effect, ability ending, or tag conditions)
+- **Periodic**: Executes repeatedly at defined intervals during its active duration. Treated like instant effects at each tick, modifying Base value
+
+**Stacking Behavior**: Effects can accumulate multiple instances based on stacking rules (see Stacking section below).
+
+### Gameplay Effect Data Structures
+
+**FGameplayEffectSpec (GESpec)**:
+- Contains the UGameplayEffect class (const data definition)
+- Stores effect level and instigator information
+- Represents a specific instance of an effect ready to be applied
+
+**FGameplayEffectSpecHandle (GESpecHandle)**:
+- Reference wrapper for a GESpec
+- **Purpose**: Allows Blueprints to generate a spec once and apply it multiple times to multiple targets
+- Improves performance by avoiding redundant spec creation
+
+**FGameplayEffectContext (GEContext)**:
+- Data structure tracking instigator and execution metadata (positions, targets, etc.)
+- **Extensibility**: Games can subclass this to add custom game-specific information
+- Passed throughout effect execution pipeline, ideal for tracking transient execution data
+
+**FGameplayEffectContextHandle (GEContextHandle)**:
+- Polymorphic wrapper for FGameplayEffectContext or subclasses
+- Ensures proper replication of context data across network
+
+### Effect Configuration
+
+**Modifier Setup** (in GE Blueprint):
+- `Gameplay Effect/Modifiers` section defines which attributes to modify
+- Targets attributes from the Target's AttributeSet
+- Each modifier specifies operation type (Add, Multiply, Override, etc.)
+
+### Stacking Mechanics
+
+**Aggregate by Source**:
+- Tracks stacks per individual source
+- Different sources maintain independent stack counts
+- Example: Enemy A applies 3 poison stacks, Enemy B can apply 3 more independently
+
+**Aggregate by Target**:
+- Tracks total stacks received by target regardless of source
+- All sources contribute to a single stack count
+- Example: All poison effects from any source count toward the same limit
+
+### Effect Application Architecture: AuraEffectActor
+
+**Purpose**: Base class for world actors that apply Gameplay Effects on overlap (potions, hazards, pickups, etc.).
+
+**Policy-Based Design**:
+- Effect application/removal behavior controlled via ENUM policies
+- Set per-effect-type in editor (e.g., instant heal on overlap, DoT on EndOverlap)
+- Policies set to `None/Don't Apply` for irrelevant effect types
+
+**Implementation Flow**:
+1. Blueprint handles overlap events (`OnOverlap`/`EndOverlap`)
+2. C++ evaluates policy for the triggered event
+3. Calls `ApplyEffectToTarget()` with appropriate parameters based on policy
+
+**Design Benefit**: Decouples overlap logic from effect application rules. Same base class supports diverse behaviors (instant pickups, persistent auras, triggered traps) through editor configuration.
+
+### Attribute Change Lifecycle
+
+**PreAttributeChange**:
+- **Timing**: Executes before attribute modification is finalized
+- **Purpose**: Enforces clamping rules (e.g., Health ≥ 0, Health ≤ MaxHealth)
+- **Limitation**: Does NOT permanently modify the underlying modifier values
+- Only affects the Current Value returned at that moment
+- **Why Repeated Clamping Needed**: Later GE applications recalculate Current Value from all active modifiers, potentially un-clamping the value
+
+**PostGameplayEffectExecute**:
+- **Timing**: Triggered after a GE successfully modifies an attribute
+- **Purpose**: Central point for reacting to attribute changes with full context
+
+**Data Parameter Benefits**:
+- Contains comprehensive Source and Target information
+- Includes instigator, ability, tags, magnitude, and more
+- Allows complex gameplay logic based on effect context
+
+**FEffectProperties Architecture**:
+- **FEffectPropertiesEnhanced**: Wrapper struct with shared pointers distinguishing Source vs Target properties
+- **FEffectProperties**: Stores all relevant pointers (Controller, Character, ASC, AttributeSet, etc.)
+- **Use Case**: Centralized data extraction from GE execution context
+- Final location for clamping Health/Mana to Max values after effect application
+
+### Curve Tables for Level Scaling
+
+**Purpose**: Data-driven scaling of effect magnitudes based on character/ability level.
+
+**Structure**:
+- Spreadsheet-like table (rows = levels, columns = effect properties)
+- Each cell defines magnitude at that level
+- Viewable as graph for visual tuning
+
+**Implementation Examples**:
+- **HealingCurve**: Scales healing amount per level
+- **ManaCurve**: Scales mana restoration per level
+
+**Design Rationale**: Separates numerical balance from code, enabling designers to iterate on progression curves without programmer involvement. Supports complex scaling formulas through visual graph editing.
+
+---
+
 7. Gameplay Tags
 	-  Tags are like names, hierarchical in nature (FNames at the core), divided by dot for parent-child relationship. ASC implements IGameplayTagAssetInterface, with useful functions as GetOwnedGameplayTags,HasMatchingGameplayTag, HasAllMatchingGameplayTags and HasAnyMatchingGameplayTags. Gameplay Tag Manager keeps tracks of how many instances of a tag exist (tag map count).
 	- GEffects can contain tags that they grant to the ASC they are been applied to: GEffect has a duration based effect that grants a tag to the ASC affected, and it gets removed when the duration effect expires. Per example, an ASC might have some ability that it wants to apply, but it might have a blocked tag, or an ASC has a list of required tags to activate an ability. Moreover, tags can be anything such as Inputs, Abilities, Attributes, Damage Types, Buffs/Debuffs, Messages, Data etc.
