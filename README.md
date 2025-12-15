@@ -1,12 +1,42 @@
-1. Introduction
-	- Introduction to the Course.
-2. Project Creation
-	- Setup inheritance: AuraCharacterBase is base class, AuraCharacter and AuraEnemy are inherited.
-	- 2 different type of enemy (with different animations): Goblin slingshots and Goblin Spearmen.
-	- Animations take Velocity from CharacterMovement component and sets it to the Animation (in blueprint).
-	- Enhanced Input (IMC file) used in AuraPlayerController. It is stored in IMC file (Input Mapping Context). D keybind is negated A, same for Y axis (Swizzle) etc.
-	- Move function is bound to Enhanced Input Component at startup time (SetupInputComponent). Binding to MoveAction (of type UInputAction), then used in the editor with the same name.
-	- EnemyInterface abstract class is given to all enemies to inherit from. From the Player Controller, at each tick, we call CursorTrace(), checking the HitResult under the cursor trace. If the actor hit is inheriting the interface (checked with a cast), then we highlight the actor (or unhighlight) with a LastActor/ThisActor logic.
+## 1. Project Creation & Architecture
+
+### Character Hierarchy Design
+The project establishes a clear inheritance structure for all characters:
+- **AuraCharacterBase**: Base class containing shared functionality for all characters
+- **AuraCharacter**: Player character implementation
+- **AuraEnemy**: Enemy character implementation
+
+**Design Rationale**: This hierarchy allows shared gameplay systems (especially GAS components) to be initialized at the base level while maintaining specialized behavior in derived classes.
+
+### Enemy Variety
+Two enemy archetypes demonstrate animation variety:
+- Goblin Slingshotters (ranged attackers)
+- Goblin Spearmen (melee attackers)
+
+Animations are driven by the CharacterMovement component's velocity, integrated through Blueprint animation graphs.
+
+### Enhanced Input System
+**Why Enhanced Input**: Unreal's Enhanced Input system provides flexible, remappable controls with built-in modifiers, essential for modern PC/console games.
+
+**Implementation Approach**:
+- Input Mapping Context (IMC) asset stores all input bindings
+- Configured in AuraPlayerController for centralized input management
+- Input actions use modifiers (e.g., negate for opposing directions: D negates A, axis swizzling for Y-axis)
+- Bindings occur in `SetupInputComponent()` using `UInputAction` references, ensuring editor-friendly workflow
+
+### Interface-Based Enemy Interaction
+**Design Pattern**: Interface-driven highlighting system for enemy selection
+
+**Why Interfaces**: Allows polymorphic behavior without tight coupling. Any actor can implement `IEnemyInterface` to become targetable, regardless of class hierarchy.
+
+**Cursor Trace System**:
+- Executed every tick in PlayerController via `CursorTrace()`
+- Performs line trace under mouse cursor
+- Checks if hit actor implements `IEnemyInterface` (via cast)
+- Maintains `LastActor`/`ThisActor` state to efficiently toggle highlighting only when selection changes
+
+**Benefits**: Clean separation of concerns, extensible to other interactable objects beyond enemies, minimal performance overhead with state caching.
+
 3. Intro to the Gameplay Ability System
 	- Enemies have the Ability System Component and AttributeSet directly on the character class, but for the player it is kept on the PlayerState (so it is not lost when the player dies).
 	- Each client has its own game state/copy, same for the server, but server's copy is the authorative one. Replication of attribute changes happens only from server to client. If client want to replicate to server, he must use RPCs.
