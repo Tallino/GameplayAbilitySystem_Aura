@@ -429,13 +429,95 @@ GAS separates two critical actor references:
 
 ---
 
-8. RPG Attributes
-   - Initialization of attributes can be applied either through DTs or GEs. Through DTs, we create a DT (with row structure = AttributeMetaData), with AuraAttributeSet.X as rows (X being the attribute), and then assign the DT to the exposed ASC in the editor of AuraPlayerState, section AttributeTest -> Default Starting Data. Through GEs, we self-apply GE_AuraPrimaryAttributes in our CharacterBase at startup time (InitializePrimaryAttribute function called in InitAbilityActorInfo). Our preferred way is with GE and that's how we will initialize our attributes.
-   - We always used Scalable Floats as modifiers, but now we want to use Attribute Based: they are based on other attributes, so these are effects that can modify an attribute (adding/subtracting etc.) based on the value of other attributes (GE -> Modifiers -> Index -> Modifier Magnitude -> Attribute Based Magnitude -> Backing Attribute). Order of modifiers is important, as it will be the order in which they will be applied..... especially if we use multiply/divide!
-   - Thanks to coefficients, for each modifier (index), we can flexibly manipulate the values of each modifier before they get summed/subtracted etc. to other modifiers. Specifically, just above "Backing Attribute" subsection, we can find Pre Multiply Additive Value (which is summed to the attribute BEFORE the coefficient multiplication), the coefficient itself (which is multiplied to the attribute), and Post Multiply Additive Value (which is summed to the attribute AFTER the coefficient multiplication).
-   - Derived attributes are attributes that DEPEND on other attributes (i.e. secondary attributes, mainly depending on the primary ones)... so that means that primary attributes may apply effects/increase/decrease secondary attributes. We now therefore have 3 division of attributes: Primary, Secondary and Vital (Health and Mana). Secondary Attributes get initialized via a self-applied GE at startup time, just like we do for the primary ones. Same for Vital Attributes, which are initialized last as they depend on MaxHealth and MaxMana (secondary attributes)
-   - Modifier Magnitude Calculation (MMC) is a class we create when we want to base our attributes not only on other attributes, but on other entities (in our case, such as the Level, in the PlayerState). We want our MMC (custom calculation) be non-dependant on classes, instead dependent on interfaces (ICombatInterface). All actors who combat can inherit from this interface, where anyone can GetPlayerLevel from it. So Level is on PlayerState for the character, and on the Enemy class for the Enemy. They both inherit from the ICombatInterface, and return their one implementation of GetPlayerLevel.
-   - So our MMC classes, inheriting from GameplayModMagnitudeCalculation, are created for both MaxHealth and MaxMana. In the constructor we capture the DEFINITION of the attribute on what they are based on (e.g. Vigor for MaxHealth, Intelligence for MaxMana). Inherited function called CalculateBaseMagnitude_Implementation() is automatically called, and we fill it in with all the information to get the attribute's value and use it as a modifier (together with the Level) for MaxHealth/Mana, and the result finally returned. Remember to set in the editor the attribute's "Magnitude Calculation Type" to "Custom Class Calculation" (in the GE), and finally set the Calculation Class to the MMC classes.
+## RPG Attributes
+
+### Attribute Initialization Approaches
+
+**Two Methods Available**:
+
+**Data Table Initialization**:
+- Create DT with row structure `AttributeMetaData`
+- Define rows as `AuraAttributeSet.AttributeName`
+- Assign DT in ASC settings: `AttributeTest → Default Starting Data` (in AuraPlayerState editor)
+
+**Gameplay Effect Initialization** (Preferred Method):
+- Self-apply initialization GE at startup (e.g., `GE_AuraPrimaryAttributes`)
+- Called in `InitializePrimaryAttribute()` during `InitAbilityActorInfo()`
+- **Why Preferred**: More flexible, supports level-based scaling, integrates with GE modifier system
+
+### Attribute-Based Modifiers
+
+**Beyond Scalable Floats**: Attribute-Based modifiers calculate values from other attributes rather than static numbers.
+
+**Configuration Path**: 
+`GE → Modifiers → [Index] → Modifier Magnitude → Attribute Based → Backing Attribute`
+
+**Use Case**: Create derived relationships between attributes (e.g., Strength increases Physical Damage, Vigor increases Max Health)
+
+**Critical Consideration**: Modifier order matters significantly, especially with multiplicative operations. GAS applies modifiers sequentially in the order defined.
+
+### Coefficient System for Fine-Tuning
+
+**Purpose**: Allows mathematical manipulation of backing attribute values before final application.
+
+**Three Adjustment Points** (processed in order):
+1. **Pre-Multiply Additive Value**: Added to backing attribute before coefficient
+2. **Coefficient**: Multiplies the (adjusted) backing attribute value  
+3. **Post-Multiply Additive Value**: Added after coefficient multiplication
+
+**Formula**: `FinalValue = (BackingAttribute + PreMultiplyAdditive) × Coefficient + PostMultiplyAdditive`
+
+**Design Benefit**: Enables complex scaling formulas without custom code (e.g., "50% of Strength + 10" becomes Pre=0, Coeff=0.5, Post=10)
+
+### Attribute Categories & Dependencies
+
+**Three-Tier Architecture**:
+
+**Primary Attributes**: Foundation attributes with no dependencies (Strength, Intelligence, Vigor, etc.)
+- Initialized first via self-applied GE at startup
+
+**Secondary Attributes**: Derived from primary attributes
+- Examples: Armor (from Vigor), Critical Hit Chance (from Dexterity), Max Health (from Vigor)
+- Initialized second via self-applied GE after primaries are set
+- Use Attribute-Based modifiers pointing to primary attributes
+
+**Vital Attributes**: Core resources depending on secondary attributes
+- Health (depends on Max Health)
+- Mana (depends on Max Mana)
+- Initialized last, ensuring Max values exist before current values are set
+
+**Initialization Order Rationale**: Dependencies must be resolved bottom-up. Initializing vitals before their max values would result in incorrect clamping or ratio calculations.
+
+### Modifier Magnitude Calculation (MMC)
+
+**Purpose**: Enables attribute calculations based on external data beyond just other attributes (e.g., character level, game state).
+
+**Use Case**: Max Health/Mana scaling based on both attribute values AND character level.
+
+**Interface-Based Design**:
+- MMC classes depend on `ICombatInterface`, not concrete classes
+- `ICombatInterface::GetPlayerLevel()` provides level data
+- **Player**: Level stored in PlayerState
+- **Enemy**: Level stored in Enemy class
+- Both implement interface, maintaining polymorphism
+
+**Implementation Pattern**:
+1. Create MMC class inheriting from `UGameplayModMagnitudeCalculation`
+2. In constructor: Capture attribute definitions (e.g., Vigor for MaxHealth, Intelligence for MaxMana)
+3. Override `CalculateBaseMagnitude_Implementation()`
+4. Inside function: Extract backing attribute value and level, apply formula, return result
+
+**Editor Configuration**:
+- Set modifier's "Magnitude Calculation Type" to "Custom Calculation Class"
+- Assign specific MMC class (e.g., `MMC_MaxHealth`, `MMC_MaxMana`)
+
+**Design Benefits**:
+- **Extensible**: New calculation factors (difficulty, buffs) can be added without modifying attribute system
+- **Reusable**: Same MMC pattern applies to any complex attribute calculation
+- **Polymorphic**: Interface-based approach works across all combat-capable actors
+
+---
+
 9. Attribute Menu
    - We now design our Attribute Menu. We will have WBP_FramedValue, WBP_TextValueRow, and WBP_TextValueButtonRow (where we can add attribute points to our PRIMARY attributes), all contained in WBP_AttributeMenu, and all of them are controlled (brush, width and height settings) with blueprints in their graph whenever we wanted certain parameters to be variables (and non hardcoded). 
    - WBP_Button is a standalone blueprint used for our open/close buttons and our primary attribute "+" sign, and WBP_WideButton is used in the UI interface to open the AttributesMenu. Finally, we open and close the menu from WBP_Overlay; we also use an Event Dispatcher (i.e, blueprint version of delegates), to which the Overlay subscribes, to know when the menu has been destroyed (X button clicked), so to re-enable the WBP_WideButton.
