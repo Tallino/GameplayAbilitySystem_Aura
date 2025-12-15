@@ -647,18 +647,152 @@ GAS separates two critical actor references:
 
 ---
 
-10. Gameplay Abilities
-    - Gameplay abilities are actions/skills that an actor can perform, but rather than implementing the action with a simple function, a GA can be an instanced object, running asynchronously. This means it can be activated at some point in time, and run multistage tasks, that may or may not span across periods of time. Ability Tasks perform asynchronous work during a gameplay ability execution. They can affect execution flow by broadcasting delegates.
-    - The ASC must be granted the ability, and when this happens, a GameplayAbilitySpec is created (it defines the detail pertaining the GA). Abilities are granted on server, and when this happens, the Spec is replicated to the client, so they can activate it from there. Once activated, GAs are said to be active. Then they either End, or Cancelled. Finally, they have cost and cooldown, and they can run asynchronously (multiple active at the same time).
-    - In AuraCharacter's PossessedBy we call a function to set the abilities. This calls a function in AuraCharacterBase where we call the ASC passing an array of abilities we set through BP. The ASC will then loop in this array and finally add + activate the abilities. Our base class for all GAs is AuraGameplayAbility.
-    - Abilities Tags are the tags that the abilities has. All the rest of the settings are explained in the comments in the details panel of the GA. What NOT TO USE: Replication Policy (Useless, as GAs are already replicated automatically); Server Respects Remote Ability Cancellation (it means the client can decide on the server, not a good idea); Replicate Input Directly (so possibly calling an RPC at each frame, highly non-performative and therefore discouraged).
-    - So we want to bind inputs to GAs. Before we bound inputs directly to the ASC, but it was too rigid. Now with Enhanced input, we bind them via the Input Mapping Context. We will have a data driven approach, using a Data Asset that is going to contain input actions, each linked with gameplay tags. So we want to assign various tags to our GAs, in order change input-to-ability mappings at runtime.
-    - AuraInputConfig is our Data Asset based class where we store arrays of structs composed of gameplay tags and input actions. Input actions are created in blueprint and assigned to the first 4 numbered keys + left mouse click + right mouse click in our IMC_AuraContext file. Tags are created natively in C++ in our GameplayTags singleton file. Finally, they are paired via blueprint in the array mentioned before.
-    - AuraInputComponent instead is where we declare a template function in charge of binding the future gameplay functions to the InputActions, passing a tag as an input parameter. Each Input Action will be able to bind up to 3 different function: for Pressed, Released and Held. In AuraPlayerController we call the BindActions, passing in the InputConfig, and bind to each of our actions (as for now, 4 keys + LMB + RMB) three different functions for pressed, held and released. We can indeed also see printed out the tags associated to the actions.
-    - Finally, from the PlayerController we call the functions in the ASC that then activates the abilities with exact tag match. Remember that when (in function AddCharacterAbilities) we loop through the StartupAbilities array (set in BP on AuraCharacter), adding their tag to the DynamicAbilityTags array, then finally give the ability to the ASC, we can then find the abilities in a prebuilt array called GetActivatableAbilities(). Indeed, this is where we finally take the Specs and activate them based on their tag (calling, in the ASC, the final prebuilt function AbilitySpecInputPressed);
-    - To move our character we will use AddMovementInput (as it works also in multiplayer). But since normal pathfinding algorithms would result in abrupted change of movements in case of an obstacle lying in the middle of the path, we will use a spline to approximate the path with a curve and make it smoother. First of all, when we click the first time (inside AbilityInputTagPressed), we check if we are using the LMB and if we are targeting something, setting a boolean). Then, inside AbilityInputTagHeld, if we are not using LMB it means we are using an ability for sure, else, if we are using LMB and not targeting, then again, we are using an ability for sure. Finally, if we are using LMB and NOT targeting, then we cache the direction under the cursor, and add movement input to that direction.
-    - In AbilityInputTagReleased instead, we do the same check as before, but if we are using LMB and NOT targeting, when we release, we want to autorun there: we use FindPathToLocationSynchronously(), taking the pathPoints of the result and adding them to our spline component. In the tick, we check if we are autorunning, and if yes, we add movement in the direction of the closes spline point to us. If we get close to the point under the AutoRunAcceptanceRadius, we stop.
-    - We now want to create projectiles and our base class will be AuraProjectile. All children of this class will have a USphereComponent and a UProjectileMovementComponent (we set initial speeds already). In BeginPlay, we AddDynamic (delegate) to function OnSphereOverlap. AuraProjectileSpell instead is our GA class (inheriting from GameplayAbility.h), that will override and call ActivateAbility: if we are the server, we spawn an AuraProjectile in deferred way (i.e., 2-steps: so later we can GE spec to cause damage in between) with a blueprint callable function. Small note: we spawn it at the tip of the staff, thanks to an FVector location we keep on ICombatInterface (that Aura inherits from), giving its name based on the bone name in the editor.
+## Gameplay Abilities
+
+### Gameplay Ability Fundamentals
+
+**Conceptual Shift**: Unlike traditional function-based actions, Gameplay Abilities (GA) are instanced objects capable of asynchronous, multi-stage execution.
+
+**Key Characteristics**:
+- Can run across multiple frames/time periods
+- Support complex, stateful behavior
+- Execute asynchronously (multiple abilities active simultaneously)
+
+**Ability Tasks**: Specialized objects performing asynchronous work during ability execution. Control execution flow through delegate broadcasting.
+
+### Ability Lifecycle
+
+**Granting Phase**:
+- Server grants ability to ASC
+- Creates `GameplayAbilitySpec` containing ability configuration and state
+- Spec automatically replicates to owning client
+- **Why Specs**: Separates ability definition (class) from runtime instance data (spec)
+
+**Execution States**:
+1. **Granted**: Ability available in ASC but inactive
+2. **Active**: Ability currently executing
+3. **Ended**: Ability completed successfully
+4. **Cancelled**: Ability interrupted before completion
+
+**Resource Management**:
+- Cost: Resources consumed on activation (mana, stamina, etc.)
+- Cooldown: Time before ability can be activated again
+
+### Ability Initialization Architecture
+
+**Granting Flow**:
+1. `AuraCharacter::PossessedBy()` calls ability setup function
+2. Calls into `AuraCharacterBase` passing Blueprint-configured ability array
+3. ASC loops through array, granting and optionally activating abilities
+
+**Base Class**: `AuraGameplayAbility` - Foundation for all project-specific abilities
+
+### Gameplay Ability Configuration
+
+**Ability Tags**: Tags the ability possesses for identification and filtering.
+
+**Settings to AVOID**:
+- **Replication Policy**: Redundant (GAs already replicate automatically)
+- **Server Respects Remote Ability Cancellation**: Allows client authority over server decisions (breaks authority model)
+- **Replicate Input Directly**: Triggers RPC per frame (severe performance cost)
+
+**Design Principle**: Rely on GAS's built-in replication rather than manual configuration. Manual settings often introduce bugs or performance issues.
+
+### Data-Driven Input Binding System
+
+**Evolution**: Previous rigid direct-to-ASC binding replaced with flexible tag-based system.
+
+**Architecture Goal**: Runtime-remappable input → ability associations using Gameplay Tags.
+
+**AuraInputConfig Data Asset**:
+- Custom `UDataAsset` subclass storing input configuration
+- Contains array of structs: `(GameplayTag, UInputAction*)`
+- **Input Actions**: Created in Blueprint, assigned to keys (1-4) and mouse buttons in IMC
+- **Tags**: Defined natively in C++ GameplayTags singleton
+- **Pairing**: Configured in Blueprint via Data Asset instance
+
+**Benefits**: Designers can change key bindings, ability-input mappings, and input contexts without code changes.
+
+### Enhanced Input Integration
+
+**AuraInputComponent**:
+- Custom input component with templated binding function
+- Supports three callback types per action: **Pressed**, **Held**, **Released**
+- Accepts Gameplay Tag as parameter to associate input with ability
+
+**Binding Flow** (in AuraPlayerController):
+1. Call `BindActions()` with InputConfig Data Asset
+2. For each InputAction in config (4 keys + LMB + RMB):
+   - Bind Pressed callback
+   - Bind Held callback
+   - Bind Released callback
+3. Each callback receives associated Gameplay Tag
+
+**Runtime Activation**:
+- PlayerController functions call ASC with tag
+- ASC searches `GetActivatableAbilities()` for matching spec
+- Calls `AbilitySpecInputPressed()` on matching ability
+- **Tag Matching**: Exact match required between input tag and ability's tags
+
+**Why Three Callbacks**: Enables complex input handling (charge attacks on hold, quick-cast on press, cancel on release).
+
+### Movement System with Pathfinding
+
+**Design Choice**: `AddMovementInput()` for multiplayer compatibility.
+
+**Challenge**: Standard pathfinding produces jarring direction changes when encountering obstacles.
+
+**Solution**: Spline-based path smoothing for natural character movement.
+
+**Input State Logic**:
+
+**AbilityInputTagPressed** (initial click):
+- Check if LMB + targeting enemy
+- Set boolean flag for target state
+
+**AbilityInputTagHeld** (button held):
+- If not LMB → activate ability
+- If LMB + targeting → activate ability (attack enemy)
+- If LMB + not targeting → cache cursor direction, add movement input
+
+**AbilityInputTagReleased** (button released):
+- If LMB + not targeting → initiate autorun
+- Call `FindPathToLocationSynchronously()` to get path points
+- Populate spline component with path points
+
+**Autorun Execution** (in Tick):
+- Find closest spline point to character
+- Add movement input toward that point
+- Stop when within `AutoRunAcceptanceRadius` of destination
+
+**Design Rationale**: Separates click-to-move from ability activation, prevents accidental ability usage during movement, provides smooth pathfinding without custom navigation mesh modifications.
+
+### Projectile System
+
+**AuraProjectile Base Class**:
+- `USphereComponent`: Collision detection
+- `UProjectileMovementComponent`: Automatic movement with configured initial speed
+- `BeginPlay()`: Binds `OnSphereOverlap` delegate with `AddDynamic`
+
+**AuraProjectileSpell Gameplay Ability**:
+- Inherits from `UGameplayAbility`
+- Overrides `ActivateAbility()`
+
+**Server-Side Spawning**:
+- Authority check ensures server executes spawn
+- **Deferred Spawning Pattern**: Two-step spawn process
+  1. Spawn projectile with incomplete initialization
+  2. Configure Gameplay Effect spec for damage
+  3. Finish spawning
+- **Why Deferred**: Allows GE configuration between spawn and initialization
+
+**Spawn Location**: Staff tip position via `ICombatInterface::GetCombatSocketLocation()`
+- Interface method returns socket location by bone name
+- Bone name configured in editor per character
+- **Polymorphism Benefit**: Different characters can have different socket names while using same ability code
+
+---
+      
 11. Ability Tasks
     - Ability tasks are the workers that a GA employs to do tasks and instantaneous/periodical stuff. An example is PlayMontageAndWait (available both in BP and C++), that unites animations and conditional events (to which we can bind several delegates, such as onCompleted, onCancelled etc.). In order to spawn the fire bolt at the right moment, we create a MontageEvent (derived from AnimNotify), and call it at the exact moment in the montage (when the staff is fully stretched). In the MontageEvent, we override ReceiveNotify so to send a GameplayEvent (with tag FireBolt, added in project settings) to the actor (FireBolt GA) when we get notified. Finally, in the GA event graph, we WaitGameplayEvent (with FireBolt tag), and then spawn the fire bolt right after (after EventReceived connection pin) with the above-mentioned blueprint callable function (SpawnProjectile).
     - We use an ability task (TargetDataUnderMouse) to send the location data under our mouse cursor at the time of firing the bolt (we get the player controller from the ability task, then the HitResult, then we broadcast the location through delegates). In BP, we actually use the delegate as execution pin, and we see it works in singleplayer but not in multiplayer: indeed the location of the mouse cursor is not replicated up to the server from other clients.
