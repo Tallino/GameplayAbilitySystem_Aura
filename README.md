@@ -518,18 +518,135 @@ GAS separates two critical actor references:
 
 ---
 
-9. Attribute Menu
-   - We now design our Attribute Menu. We will have WBP_FramedValue, WBP_TextValueRow, and WBP_TextValueButtonRow (where we can add attribute points to our PRIMARY attributes), all contained in WBP_AttributeMenu, and all of them are controlled (brush, width and height settings) with blueprints in their graph whenever we wanted certain parameters to be variables (and non hardcoded). 
-   - WBP_Button is a standalone blueprint used for our open/close buttons and our primary attribute "+" sign, and WBP_WideButton is used in the UI interface to open the AttributesMenu. Finally, we open and close the menu from WBP_Overlay; we also use an Event Dispatcher (i.e, blueprint version of delegates), to which the Overlay subscribes, to know when the menu has been destroyed (X button clicked), so to re-enable the WBP_WideButton.
-   - So we need to show attribute changes in the UI, but we want to avoid to create a delegate/broadcast FOR EACH attribute, because it is not scalable. So whenever any attribute changes in the model, a generic delegate will be triggered on the WidgetController (FOnAttributeChanged), who will then broadcast different info thanks to a struct we will create that will be based on the attribute's gameplay tag.
-   - So the flow is: Widget controller is bound to delegates from the ASC, so when an attribute changes, the widget controller will know about it. In turn, he will take that attribute and try to figure out what gameplay tag it corresponds. Then we can perform a lookup based on the gameplay tag to find its corresponding struct, finally taking all the information from the struct and sending it to the widget: the entity in charge of taking the tag and returning the corresponding struct is called a Data Asset.
-   - AuraGameplayTags is a singleton struct where we initialize the attributes tags natively in C++: we will then get the tags from here when we need to send them to the DataAsset. AssetManager is an in-built singleton class from where we inherit and then assign in DefaultEngine.ini file: we then use the new class (AuraAssetManager) to call the initialization on the AuraGameplayTags class. So we create our AttributeInfo class (derived from DataAsset) where we put our struct + an array member variable containing them. Finally, in the editor (in Miscellaneous) we can create a Data Asset file (based on our custom class), where we can manually input the struct information for each index of the array (i.e., each combo of Attribute Tag + Name + Description).
-   - We then create our AttributeMenuWidget controller class. Now that we have another widget controller (in addition to the Overlay widget controller), we still construct in AuraHUD just like the overlay, but we want to easily get the widget controller without going through all the classes: in other words, widgets shouldn't go through the GetController function of the HUD to get their controller. So we will use a Blueprint Function Library, where we can use blueprint callable static functions to easily access the controller we want.
-   - Therefore, AuraAbilitySystemLibrary class is created where we statically get the widget controllers, through pure blueprint functions, that ultimately gets the controller from the HUD. The HUD constructs the AttributeMenu (in C++), then gets the AttributeMenuWidgetController from the Blueprint Library (who gets it from the HUD, for the reasons said above), and then finally set its controller (all in the blueprint graph).
-   - In AttributeMenuWidgetController we create a delegate (in C++) to which the Attribute Rows widget will subscribe. So we find our AttributeInfo struct through tag, broadcast the struct to the widget, who (in blueprint) will set text and value (taken from the broadcast struct). The functions are declared in the base class (WBP_TextValueRow), and called in child class WBP_TextValueButtonRow right after the triggered delegate.
-   - To assign the correct name of each attribute to the attribute menu in the UI, we give a name to all rows, make them variables, and set their Attribute Tag in the graph of WBP_AttributeMenu (SetAttributeTags function). Then, in the graph of TextValueRow and TextValueButtonRow, we match the AttributeTag received from the broadcast struct of the controller with the AttributeTag of that specific row: if they match, we set the label.
-   - So in the AttributeSet we create a map TagToAttribute, that maps GameplayTags (Attribute Tags) to function pointers (which store the return value of the static getters (accessors) of our attributes). Since the return type of the function pointer is of type TBaseStaticDelegateInstance and a lot of other horrible stuff, we decide to use aliasing to call it simply TStaticFuncPtr (templated version to store whatever func pointer we want). So in the constructor of AuraAttributeSet we add the pairs (AttributeTag to its static getter) to the map, then in the widget controller we loop in the map, based on the AttributeTag key we get the Attribute variable, from which we GetNumericalValue, finally adding the value to the AttributeInfo struct and then broadcasting it to the widget.
-   - Finally, to be sure that attributes change in the UI when they change at runtime, we loop (in BindCallbacksToDependencies) into our map binding to each Attribute a lambda function (thanks to in-built function GetGameplayAttributeValueChangeDelegate, so trigger the lambda everytime the attribute changes). The lambda is obviously the usual broadcast of the correct AttributeInfo struct to the widgets.
+## Attribute Menu
+
+### Widget Architecture
+
+**Widget Hierarchy**:
+- **WBP_FramedValue**: Visual container for attribute displays
+- **WBP_TextValueRow**: Read-only attribute display
+- **WBP_TextValueButtonRow**: Interactive row with "+" button for spending attribute points on primary attributes
+- **WBP_AttributeMenu**: Parent container holding all attribute rows
+- **WBP_Button**: Reusable button component for open/close actions and primary attribute increment buttons
+- **WBP_WideButton**: UI button to open the AttributeMenu
+
+**Design Choice**: Parameterize styling (brush, dimensions) through Blueprint-exposed variables rather than hardcoding, enabling rapid iteration without recompilation.
+
+**Menu State Management**:
+- Menu opened/closed from WBP_Overlay
+- Event Dispatcher notifies Overlay when menu is destroyed (X button clicked)
+- Overlay re-enables WBP_WideButton upon receiving destruction event
+
+### Scalable Attribute Broadcasting Architecture
+
+**Challenge**: Avoid creating individual delegates for each attribute (non-scalable for 20+ attributes).
+
+**Solution**: Generic attribute change system using Gameplay Tags as identifiers.
+
+**Data Flow**:
+1. **Model Layer**: Attribute changes in AttributeSet (via GE or direct modification)
+2. **Controller Layer**: Widget controller binds to ASC's attribute change delegates
+3. **Tag Resolution**: Controller identifies which Gameplay Tag corresponds to changed attribute
+4. **Data Lookup**: Tag used to query Data Asset for attribute metadata struct
+5. **Broadcasting**: Generic `FOnAttributeChanged` delegate broadcasts struct to all subscribing widgets
+6. **Widget Layer**: Widgets filter broadcasts by matching their AttributeTag to received struct's tag
+
+**Key Benefit**: One delegate handles all attributes. New attributes require zero new delegate infrastructure.
+
+### Data Asset Pattern for Attribute Metadata
+
+**Purpose**: Decouple attribute metadata (names, descriptions, icons) from code.
+
+**AuraGameplayTags Singleton**:
+- Native C++ struct storing all attribute tags
+- Centralized tag repository accessed throughout codebase
+- Initialized via AssetManager pattern
+
+**AssetManager Integration**:
+- Create `AuraAssetManager` inheriting from engine's `UAssetManager` singleton
+- Register in `DefaultEngine.ini` to ensure early initialization
+- Triggers `AuraGameplayTags` initialization at engine startup
+
+**AttributeInfo Data Asset**:
+- Custom class derived from `UDataAsset`
+- Contains struct definition with: Tag, Name, Description, Icon, Value
+- Exposes array of these structs for editor population
+- **Editor Workflow**: Create DA instance in Miscellaneous, manually configure each attribute's metadata
+
+**Design Rationale**: Designers can modify attribute presentation without touching code. Supports localization and rapid content iteration.
+
+### Widget Controller Access Pattern
+
+**Problem**: Multiple widget controllers (Overlay, AttributeMenu, etc.) need consistent access pattern.
+
+**Anti-Pattern**: Direct `GetController()` calls through HUD create tight coupling and verbose Blueprint graphs.
+
+**Solution**: Blueprint Function Library for centralized controller access.
+
+**AuraAbilitySystemLibrary**:
+- Static functions marked `BlueprintCallable` and `BlueprintPure`
+- Encapsulates HUD retrieval and controller construction logic
+- **Usage**: Widgets call library functions directly, library handles HUD interaction
+
+**Construction Flow**:
+1. HUD constructs AttributeMenu widget controller (C++)
+2. Blueprint calls library function to retrieve controller
+3. Library fetches from HUD internally
+4. Blueprint sets controller on widget
+
+**Benefits**: Simplifies Blueprint graphs, centralizes controller creation logic, reduces coupling between widgets and HUD.
+
+### Attribute Display Update System
+
+**Broadcasting Pattern**:
+- AttributeMenuWidgetController defines delegate for attribute updates (C++)
+- WBP_TextValueRow and WBP_TextValueButtonRow subscribe to delegate
+- Controller finds AttributeInfo struct by tag, broadcasts to all subscribers
+- Base class (WBP_TextValueRow) declares update functions
+- Child class (WBP_TextValueButtonRow) calls inherited functions when delegate triggers
+
+**Tag Matching in Widgets**:
+- Each row widget assigned a specific AttributeTag (set in WBP_AttributeMenu's `SetAttributeTags()`)
+- Rows receive all broadcasts but only update when broadcast tag matches their assigned tag
+- **Performance Note**: Acceptable overhead since attribute changes are infrequent
+
+### Tag-to-Attribute Mapping System
+
+**Challenge**: Convert Gameplay Tag to actual attribute value at runtime.
+
+**Solution**: `TMap<FGameplayTag, TStaticFuncPtr>` in AttributeSet.
+
+**TStaticFuncPtr Type Alias**:
+- Hides complex template syntax: `TBaseStaticDelegateInstance<...>`
+- Templated alias stores function pointers to attribute getter functions
+- **Purpose**: Makes code readable while maintaining type safety
+
+**Map Construction** (in AuraAttributeSet constructor):
+- Populate map with pairs: `(AttributeTag → Static Getter Function Pointer)`
+- Example: `(Tags.Attributes.Primary.Strength → FAttributeSet::GetStrengthAttribute)`
+
+**Runtime Lookup Flow**:
+1. Widget controller iterates through TagToAttribute map
+2. For each tag, calls stored function pointer to retrieve attribute
+3. Calls `GetNumericValue()` on returned attribute
+4. Populates AttributeInfo struct with tag + value
+5. Broadcasts struct to widgets
+
+### Reactive Attribute Updates
+
+**BindCallbacksToDependencies Implementation**:
+- Iterate through TagToAttribute map
+- For each attribute, bind lambda to `GetGameplayAttributeValueChangeDelegate(Attribute)`
+- Lambda captures necessary context (tag, controller)
+- When attribute changes, delegate triggers lambda
+- Lambda constructs updated AttributeInfo struct and broadcasts to widgets
+
+**Design Elegance**: Single binding loop handles all attributes reactively. Adding new attributes requires only updating the TagToAttribute map; binding system automatically includes them.
+
+**Why This Architecture Works**: Combines GAS's built-in attribute change delegates with data-driven tag system, creating a scalable solution that grows linearly with attribute count rather than exponentially with widget-attribute combinations.
+
+---
+
 10. Gameplay Abilities
     - Gameplay abilities are actions/skills that an actor can perform, but rather than implementing the action with a simple function, a GA can be an instanced object, running asynchronously. This means it can be activated at some point in time, and run multistage tasks, that may or may not span across periods of time. Ability Tasks perform asynchronous work during a gameplay ability execution. They can affect execution flow by broadcasting delegates.
     - The ASC must be granted the ability, and when this happens, a GameplayAbilitySpec is created (it defines the detail pertaining the GA). Abilities are granted on server, and when this happens, the Spec is replicated to the client, so they can activate it from there. Once activated, GAs are said to be active. Then they either End, or Cancelled. Finally, they have cost and cooldown, and they can run asynchronously (multiple active at the same time).
