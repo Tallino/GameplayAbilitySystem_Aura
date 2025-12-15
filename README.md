@@ -118,9 +118,38 @@ GAS separates two critical actor references:
 
 ---
 
-4. Attributes
-	- FGameplayAttributeData is the type for attributes. Inside OnRep_Health (notifier), we call the macros in charge of notifying the AS (GAMEPLAYATTRIBUTE_REPNOTIFY). To mark a variable as replicated, the function in charge is GetLifetimeReplicatedProps. Inside here, we call DOREPLIFETIME_CONDITION_NOTIFY macro.
-	- ATTRIBUTE_ACCESSORS is a container macro for defining several accessor macros, for easily initting, setting and getting the attributes (with Init/Get/Set<AttributeName>).
+## Attributes
+
+### Attribute Data Structure
+
+**Core Type**: `FGameplayAttributeData` 
+- GAS's fundamental structure for storing attribute values
+- Handles both the base value and current value internally
+- Provides built-in replication support
+
+### Attribute Replication Setup
+
+**Replication Notification Pattern**:
+- Each replicated attribute requires a `OnRep_` function (e.g., `OnRep_Health`)
+- Inside the rep notifier, call `GAMEPLAYATTRIBUTE_REPNOTIFY` macro
+- **Purpose**: Notifies the AttributeSet that the attribute has replicated, triggering proper GAS callbacks and ensuring system consistency
+
+**Replication Registration**:
+- Override `GetLifetimeReplicatedProps()` to mark attributes for replication
+- Use `DOREPLIFETIME_CONDITION_NOTIFY` macro for each attribute
+- This macro combines replication conditions with rep notify setup in a single call
+
+**Why This Architecture**: GAS needs to track attribute changes for gameplay effects, predictions, and callbacks. The rep notify system ensures these systems stay synchronized across client and server.
+
+### Attribute Accessors
+
+**`ATTRIBUTE_ACCESSORS` Macro**:
+- Container macro that generates multiple accessor functions for each attribute
+- Creates standardized `InitAttribute()`, `GetAttribute()`, and `SetAttribute()` functions
+- **Design Benefit**: Reduces boilerplate code and ensures consistent attribute access patterns across the codebase
+- Improves maintainability and reduces errors from manual accessor implementation
+
+---
 5. RPG Game UI
 	- UI uses MVC design pattern. The View is the widget, the controller is Widget controller and the Model is the data. The controller is in charge of transmitting data to the view, but also of transmitting button presses from the view to the data. It can also have algorithmic logic inside. One way dependency: so the widget's depend on the controller (controller doesn't need to know which widget are receiving data broadcast to them), and the controller depends on the model (controller doesn't need to know the widget that the system has).
 	- All the (globe) progress bars (health and mana) are handled via blueprint: the HUD class adds these widget to the viewport, in the InitOverlay function (called in AuraCharacter during InitAbilityActorInfo). 
