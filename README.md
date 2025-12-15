@@ -150,12 +150,68 @@ GAS separates two critical actor references:
 - Improves maintainability and reduces errors from manual accessor implementation
 
 ---
-5. RPG Game UI
-	- UI uses MVC design pattern. The View is the widget, the controller is Widget controller and the Model is the data. The controller is in charge of transmitting data to the view, but also of transmitting button presses from the view to the data. It can also have algorithmic logic inside. One way dependency: so the widget's depend on the controller (controller doesn't need to know which widget are receiving data broadcast to them), and the controller depends on the model (controller doesn't need to know the widget that the system has).
-	- All the (globe) progress bars (health and mana) are handled via blueprint: the HUD class adds these widget to the viewport, in the InitOverlay function (called in AuraCharacter during InitAbilityActorInfo). 
-	- AuraWidgetController is the mother class, OverlayWidgetController is inherited. All widget controllers have a struct containing pointers to PlayerController, PlayerState, AbilitySystemComponent and AttributeSet.
-	- To change Health/Mana in the view we use callbacks (delegates). The Broadcast function triggers the delegate, and calls all functions that have been bound to that delegate (through AddLambda). Remember that the MACRO is necessary to define the custom TYPE of your delegate, and then you define its instances.
-	- When we call OnAttributeChanged.Broadcast as a callback for when a GameplayAttribute changes, the trigger for the actual change of the view is made in blueprint (event graph of the WBP).
+
+## RPG Game UI Architecture
+
+### MVC Design Pattern
+
+**Architectural Choice**: The UI system follows Model-View-Controller pattern for clean separation of concerns.
+
+**Component Roles**:
+- **View**: Widget (UMG) - Pure presentation layer
+- **Controller**: Widget Controller - Data transmission and logic hub
+- **Model**: Game data (ASC, AttributeSet, PlayerState, etc.)
+
+**Data Flow**:
+- Controller broadcasts data changes → View receives and displays
+- View sends user input (button presses) → Controller processes → Updates Model
+- Controller can contain algorithmic logic for data transformation
+
+**Dependency Direction**: One-way dependency chain ensures loose coupling
+- **Widget → Controller**: Widgets depend on controllers but controllers don't know which specific widgets listen to their broadcasts
+- **Controller → Model**: Controllers depend on data sources but Model doesn't know which controllers consume it
+- **Benefit**: Highly modular system where components can be swapped without cascading changes
+
+### UI Implementation Structure
+
+**HUD Management**:
+- Progress bars (health/mana globes) are Blueprint-based widgets
+- AuraHUD class adds widgets to viewport via `InitOverlay()` function
+- `InitOverlay()` is called from AuraCharacter during `InitAbilityActorInfo()`, ensuring ASC is ready before UI needs attribute data
+
+**Widget Controller Hierarchy**:
+- **AuraWidgetController**: Base class providing common functionality
+- **OverlayWidgetController**: Specialized controller for HUD overlay elements
+
+**Controller Dependencies**: All widget controllers maintain a struct containing references to:
+- PlayerController
+- PlayerState  
+- AbilitySystemComponent
+- AttributeSet
+
+**Why This Struct**: Centralized access to all gameplay systems the UI needs to observe, passed during initialization.
+
+### Reactive UI Updates with Delegates
+
+**Event-Driven Updates**: UI responds to game state changes through delegate broadcasting.
+
+**Delegate Pattern**:
+- Define custom delegate types using GAS macros
+- Create delegate instances on the controller (e.g., `OnHealthChanged`, `OnManaChanged`)
+- Widgets bind callbacks via `AddLambda()` or `AddDynamic()`
+- Controller calls `Broadcast()` when attributes change, triggering all bound callbacks
+
+**Attribute Change Flow**:
+1. Gameplay Attribute changes (via Gameplay Effect or direct modification)
+2. Controller observes change through GAS callback system
+3. Controller broadcasts delegate (e.g., `OnAttributeChanged.Broadcast()`)
+4. Widget's Blueprint Event Graph receives callback
+5. Blueprint updates visual elements (progress bars, text, etc.)
+
+**Design Rationale**: This reactive pattern decouples the timing and source of attribute changes from UI updates. The controller doesn't need to know implementation details of how the widget displays the data, and new widgets can subscribe without modifying controller code.
+
+---
+
 6. Gameplay Effects
 	- Gameplay Effects (GE) change attributes through modifiers. They can be instant, (have a) duration, infinite, or periodic (treated like instant, permanently changing the Base value), and they can stack. Instant applies its modifiers immediately, once, then expires; Infinite applies and persists indefinitely until explicitly removed (by another effect, an ability ending, or a tag condition); Duration applies for a fixed amount of time, then automatically expires. Periodic executes its effect repeatedly at intervals (ticks) during its active time.
     - GESpec (specification) tells us what UGameplayEffect (const data), what level and who instigated. GESpecHandle allows blueprints to generate a GameplayEffectSpec once and then reference it by handle, to apply it multiple times/multiple targets.
