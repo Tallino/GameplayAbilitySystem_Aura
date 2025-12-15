@@ -1,4 +1,4 @@
-## 1. Project Creation & Architecture
+## Project Creation & Architecture
 
 ### Character Hierarchy Design
 The project establishes a clear inheritance structure for all characters:
@@ -37,13 +37,87 @@ Animations are driven by the CharacterMovement component's velocity, integrated 
 
 **Benefits**: Clean separation of concerns, extensible to other interactable objects beyond enemies, minimal performance overhead with state caching.
 
-3. Intro to the Gameplay Ability System
-	- Enemies have the Ability System Component and AttributeSet directly on the character class, but for the player it is kept on the PlayerState (so it is not lost when the player dies).
-	- Each client has its own game state/copy, same for the server, but server's copy is the authorative one. Replication of attribute changes happens only from server to client. If client want to replicate to server, he must use RPCs.
-	- Replication Mode on player will be of type Mixed (GEs will be replicated to owning client only), while on enemies will be of type Minimal (GEs won't be replicated).
-	- ASCs have Owner Actor and Avatar Actor. So for enemies, Owner and Avatar are the same Enemy Character. For players, the Owner Actor is the Player State, while the Avatar Actor will be the character.
-	- InitAbilityActorInfo must be done after possession: for players ASC lives on PlayerState, so make sure that PlayerState is valid and Controller has been set. Server calls it inside PossessedBy function, client inside OnRep_PlayerState function (a rep notifier i.e. a function being called as a result of something being replicated); for enemies ASC lives on pawn, so call it inside BeginPlay.
-	- For Mixed Replication mode, the OwnerActor's Owner must be the Controller. For pawns, this is set automatically in PossessedBy(). The PlayerState's Owner is automatically set to the Controller. So if your OwnerActor is not the PlayerState, and you used Mixed Replication mode, you must call SetOwner() on the OwnerActor to set its owner to the Controller.
+---
+
+## Introduction to the Gameplay Ability System (GAS)
+
+### ASC Ownership Architecture
+
+**Critical Design Decision**: Where to place the Ability System Component (ASC) differs between player and enemy characters:
+
+**Enemies**: ASC and AttributeSet live directly on the character class
+- Simple architecture since enemies don't respawn with persistent state
+- ASC destroyed with the character on death
+
+**Players**: ASC and AttributeSet live on the PlayerState
+- **Why PlayerState**: Preserves abilities and attributes across character respawns/deaths
+- PlayerState persists throughout the player's session while the character pawn may be destroyed and recreated
+- Enables seamless attribute/ability retention during gameplay events like death or character swaps
+
+### Network Replication Model
+
+**Server Authority**: The server holds the authoritative game state. All clients maintain local copies, but server state takes precedence during conflicts.
+
+**Replication Flow**:
+- Attribute changes replicate automatically from server → client
+- Client → server communication requires explicit RPCs (Remote Procedure Calls)
+
+### Replication Modes
+
+**Player Characters**: `Mixed` replication mode
+- Gameplay Effects (GEs) replicate only to the owning client
+- Reduces network bandwidth while ensuring the player sees their own effects
+- Other clients don't need full GE details for the player
+
+**Enemy Characters**: `Minimal` replication mode
+- GEs are not replicated at all
+- Further bandwidth optimization since clients don't need enemy GE details
+- Enemy visual feedback handled through other replication mechanisms
+
+### Owner vs Avatar Actor Pattern
+
+GAS separates two critical actor references:
+
+**Owner Actor**: Owns the ASC itself
+**Avatar Actor**: The physical character representation
+
+**For Enemies**:
+- Owner Actor = Enemy Character
+- Avatar Actor = Enemy Character
+- Both references point to the same actor
+
+**For Players**:
+- Owner Actor = PlayerState (holds the ASC)
+- Avatar Actor = Character Pawn (physical representation)
+- Separation enables persistence across pawn destruction
+
+### ASC Initialization Timing
+
+**Critical Requirement**: `InitAbilityActorInfo()` must be called after possession to ensure proper network setup.
+
+**Player Characters** (ASC on PlayerState):
+- **Server**: Call in `PossessedBy()` - executed when controller possesses the pawn
+- **Client**: Call in `OnRep_PlayerState()` - replication notifier triggered when PlayerState replicates
+- Must validate PlayerState exists and Controller is set before initialization
+
+**Enemy Characters** (ASC on Pawn):
+- **Both Server/Client**: Call in `BeginPlay()`
+- Simpler timing since ASC lives directly on the pawn
+
+### Mixed Replication Mode Requirements
+
+**Critical Setup**: When using Mixed replication, the OwnerActor's Owner must be set to the Controller.
+
+**Automatic Cases**:
+- Pawns: `PossessedBy()` automatically sets the pawn's Owner to the Controller
+- PlayerState: Automatically sets its Owner to the Controller
+
+**Manual Setup Required**: If your OwnerActor is neither a Pawn nor PlayerState (custom setup), you must explicitly call `SetOwner(Controller)` on the OwnerActor.
+
+**Why This Matters**: Mixed replication uses the Owner chain to determine which client should receive replicated GEs. Without proper Owner setup, replication may fail or send data to wrong clients.
+
+---
+
 4. Attributes
 	- FGameplayAttributeData is the type for attributes. Inside OnRep_Health (notifier), we call the macros in charge of notifying the AS (GAMEPLAYATTRIBUTE_REPNOTIFY). To mark a variable as replicated, the function in charge is GetLifetimeReplicatedProps. Inside here, we call DOREPLIFETIME_CONDITION_NOTIFY macro.
 	- ATTRIBUTE_ACCESSORS is a container macro for defining several accessor macros, for easily initting, setting and getting the attributes (with Init/Get/Set<AttributeName>).
