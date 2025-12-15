@@ -323,20 +323,112 @@ GAS separates two critical actor references:
 
 ---
 
-7. Gameplay Tags
-	-  Tags are like names, hierarchical in nature (FNames at the core), divided by dot for parent-child relationship. ASC implements IGameplayTagAssetInterface, with useful functions as GetOwnedGameplayTags,HasMatchingGameplayTag, HasAllMatchingGameplayTags and HasAnyMatchingGameplayTags. Gameplay Tag Manager keeps tracks of how many instances of a tag exist (tag map count).
-	- GEffects can contain tags that they grant to the ASC they are been applied to: GEffect has a duration based effect that grants a tag to the ASC affected, and it gets removed when the duration effect expires. Per example, an ASC might have some ability that it wants to apply, but it might have a blocked tag, or an ASC has a list of required tags to activate an ability. Moreover, tags can be anything such as Inputs, Abilities, Attributes, Damage Types, Buffs/Debuffs, Messages, Data etc.
-	- Tag Creation = Edit -> Project Settings -> Gameplay Tags. In UE 5.3, Gameplay Effect tags are now in Gameplay Effect -> Components -> [+ icon], then choose the type of tags you need to add to the Gameplay Effect. You can also create them from the file DefaultGameEngine.ini (in Aura -> config folder). You can also create them from Data Tables (DT, in miscellaneous, then select GameplayTagTableRow as Row structure)
-	- So obviously you can apply a tag through a GE: in the GE editor, under the tag section, we have different subsections, most important are: 
-		- GameplayEffectAssetTag -> Tags the GE has and DOES NOT give to the actor
-		- GrantedTags -> These tags are applied to the actor I am applied to
-          - These are all subdivided into:
-            - Combined Tags -> Tags that I inherited and tags that I added minus tags that I removed
-            - Added -> Tags that I have in addition to my parent's tags
-            - Removed -> Tags that should be removed if my parent had them
-	-  Tags can stack when the stacking type of the GE is set to NONE, because in such case, applying multiple GEs, they will count as new GE everytime (so new tags everytime). Instead, if stacking type is NOT NONE, then applying this effect multiple times means that the effect stack goes up, and we are only going to apply that tag once.
-	-  In case of instant effect, the tag disappears immediately. So we create a delegate function (EffectApplied) that gets bound to OnGameplayEffectAppliedDelegateToSelf at startup time (remember, the declaration of this delegate is made in parent class AbilitySystemComponent.h, where it also declares the parameters that we then use in our EffectApplied function): now when we pick up an instant effect, we get all the Asset Tags from the Effect we just received and then broadcast it to the OverlayWidgetController class to generate a message on-screen.
-	-  On-screen messages are indeed triggered by EffectAssetTags.Broadcast(), who triggers a Lambda function in OverlayWidgetController where we receive the AssetTagContainer, and for each of it, we look up onto a table in the editor. The row of each table is defined in the FUIWidgetRow struct in OverlayWidgetController.h class, and the table is defined in the editor. Lookup is based on the parent tag Message (so to avoid looking for non-message type of tag), and after we find the row corresponding to our tag, we trigger a delegate (broadcasting the row) defined in blueprint (WBP_Overlay), who in turn creates a widget of type MessageWidget, setting animated image and text (taken from the received row information).
+## Gameplay Tags
+
+### Tag System Fundamentals
+
+**Structure**: Gameplay Tags are hierarchical identifiers built on FNames, using dot notation for parent-child relationships (e.g., `Damage.Fire.Burn`).
+
+**ASC Integration**: The Ability System Component implements `IGameplayTagAssetInterface`, providing query functions:
+- `GetOwnedGameplayTags()` - Retrieve all tags
+- `HasMatchingGameplayTag()` - Check for specific tag
+- `HasAllMatchingGameplayTags()` - Require all specified tags
+- `HasAnyMatchingGameplayTags()` - Require at least one tag
+
+**Tag Management**: Gameplay Tag Manager maintains a reference count for each tag instance, tracking how many effects/abilities are currently granting each tag.
+
+### Tags in Gameplay Effects
+
+**Dynamic Tag Granting**: GEs can grant tags to the ASC they're applied to, with duration matching the effect's lifetime.
+
+**Example Use Cases**:
+- **Ability Blocking**: Effect grants `Status.Stunned` tag, preventing ability activation
+- **Activation Requirements**: Ability requires `Buff.PowerUp` tag to activate
+- **Conditional Logic**: Check for `State.InCombat` tag to modify behavior
+
+**Tag Categories**: Tags can represent diverse gameplay concepts:
+- Input actions
+- Ability identifiers
+- Attribute categories
+- Damage types
+- Buffs/Debuffs
+- UI messages
+- Generic data markers
+
+### Tag Creation Methods
+
+**Project Settings**: `Edit → Project Settings → Gameplay Tags` (primary method)
+
+**UE 5.3+ GE Editor**: `Gameplay Effect → Components → [+ icon]`, select tag type to add
+
+**Config File**: Directly edit `DefaultGameEngine.ini` (in `Aura/Config/`)
+
+**Data Tables**: Create DT with `GameplayTagTableRow` as row structure for bulk tag management
+
+### Gameplay Effect Tag Categories
+
+**GameplayEffectAssetTag**:
+- Tags the GE possesses but does NOT grant to the target actor
+- Used for effect identification and filtering
+
+**GrantedTags**:
+- Tags applied to the target actor while the effect is active
+- Removed when effect expires (for duration/infinite effects)
+
+**Tag Inheritance Structure**:
+- **Combined Tags**: Final tag set after inheritance calculations
+- **Added Tags**: New tags this effect introduces beyond parent's tags
+- **Removed Tags**: Parent tags explicitly excluded in this effect
+
+### Tag Stacking Behavior
+
+**Stacking Type: NONE**:
+- Each application creates a new, independent GE instance
+- Tags are granted multiple times (separate instances per application)
+- Tag count increases with each application
+
+**Stacking Type: NOT NONE** (any aggregation method):
+- Multiple applications increase stack count of the same GE instance
+- Tags granted only once regardless of stack count
+- Tag count remains at 1 despite multiple stacks
+
+**Design Implication**: Choose stacking type based on whether you want tag count to reflect application count.
+
+### Instant Effect Tag Broadcasting
+
+**Challenge**: Instant effects expire immediately, so their tags vanish before they can be observed.
+
+**Solution**: Tag Broadcasting System via `OnGameplayEffectAppliedDelegateToSelf`
+
+**Implementation Flow**:
+1. Bind custom `EffectApplied()` function to `OnGameplayEffectAppliedDelegateToSelf` at initialization
+2. When instant effect applies, delegate triggers `EffectApplied()`
+3. Function extracts AssetTags from the applied effect
+4. Broadcasts tags to OverlayWidgetController for UI response
+
+**Why This Works**: Captures effect metadata at the moment of application, before the instant effect disappears.
+
+### Message System Architecture
+
+**Tag-to-UI Pipeline**: Converts Gameplay Effect Asset Tags into on-screen messages.
+
+**Data Flow**:
+1. `EffectApplied()` broadcasts AssetTag container via `EffectAssetTags.Broadcast()`
+2. OverlayWidgetController receives tags via bound Lambda function
+3. For each tag, performs Data Table lookup using parent tag `Message.*` as filter
+4. DT row structure defined by `FUIWidgetRow` struct (contains message text, icon, animation data)
+5. Broadcasts matching row data to Blueprint (WBP_Overlay)
+6. Blueprint creates MessageWidget instance with row's image and text
+
+**Design Benefits**:
+- **Data-Driven**: Designers configure messages in DT without code changes
+- **Tag Hierarchy**: Using parent tag `Message.*` filters non-message tags, preventing irrelevant lookups
+- **Separation of Concerns**: Tag system remains generic while UI layer interprets specific tag meanings
+
+**FUIWidgetRow Purpose**: Bridges gameplay tags to UI presentation data, defining what visual feedback should appear for each message tag.
+
+---
+
 8. RPG Attributes
    - Initialization of attributes can be applied either through DTs or GEs. Through DTs, we create a DT (with row structure = AttributeMetaData), with AuraAttributeSet.X as rows (X being the attribute), and then assign the DT to the exposed ASC in the editor of AuraPlayerState, section AttributeTest -> Default Starting Data. Through GEs, we self-apply GE_AuraPrimaryAttributes in our CharacterBase at startup time (InitializePrimaryAttribute function called in InitAbilityActorInfo). Our preferred way is with GE and that's how we will initialize our attributes.
    - We always used Scalable Floats as modifiers, but now we want to use Attribute Based: they are based on other attributes, so these are effects that can modify an attribute (adding/subtracting etc.) based on the value of other attributes (GE -> Modifiers -> Index -> Modifier Magnitude -> Attribute Based Magnitude -> Backing Attribute). Order of modifiers is important, as it will be the order in which they will be applied..... especially if we use multiply/divide!
