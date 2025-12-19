@@ -16,7 +16,6 @@ using FOnSerializeMessage =
 
 class FRiderOutputDevice : public FOutputDevice {
 public:
-	~FRiderOutputDevice();
 	void Setup(TFunction<FOnSerializeMessage::TFuncType>);
 	virtual void TearDown() override;
 

@@ -7,6 +7,10 @@
 #include "Runtime/Core/Public/Containers/Array.h"
 #include "Runtime/Core/Public/Containers/ContainerAllocationPolicies.h"
 
+namespace ELogVerbosity {
+enum Type : uint8;
+}
+
 namespace rd {
 template <>
 class Polymorphic<ELogVerbosity::Type> {
