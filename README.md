@@ -793,13 +793,188 @@ GAS separates two critical actor references:
 
 ---
       
-11. Ability Tasks
-    - Ability tasks are the workers that a GA employs to do tasks and instantaneous/periodical stuff. An example is PlayMontageAndWait (available both in BP and C++), that unites animations and conditional events (to which we can bind several delegates, such as onCompleted, onCancelled etc.). In order to spawn the fire bolt at the right moment, we create a MontageEvent (derived from AnimNotify), and call it at the exact moment in the montage (when the staff is fully stretched). In the MontageEvent, we override ReceiveNotify so to send a GameplayEvent (with tag FireBolt, added in project settings) to the actor (FireBolt GA) when we get notified. Finally, in the GA event graph, we WaitGameplayEvent (with FireBolt tag), and then spawn the fire bolt right after (after EventReceived connection pin) with the above-mentioned blueprint callable function (SpawnProjectile).
-    - We use an ability task (TargetDataUnderMouse) to send the location data under our mouse cursor at the time of firing the bolt (we get the player controller from the ability task, then the HitResult, then we broadcast the location through delegates). In BP, we actually use the delegate as execution pin, and we see it works in singleplayer but not in multiplayer: indeed the location of the mouse cursor is not replicated up to the server from other clients.
-    - So first, our purpose here is to send the data (cursor hit result) from the client to the server, so the server can use this data to spawn the fire bolt (we want him to be responsible for doing it). To send the data to the server we will use RPCs, but if Activate gets called on the server before the valid data gets there (through RPC), then we would be activating with invalid data, causing problems. GAS has a TargetData instance, based on parent struct FGameplayAbilityTargetData. To send data up to the server, we will use ServerSetReplicatedTarget(). Once data reached the server, it takes its TargetSet (a delegate, FAbilityTargetDataSetDelegate) and broadcasts that delegate. On the server a map is maintained (AbilityTargetDataMap, which maps AbilitySpecs to TargetData). So finally, as soon as we get Activate function called, we send target data to the server, and if Activate gets called first, we will have Activate bound to TargetSetData, so we will broadcast the data right after. But, if the replicated target data reaches the server first, then Activate gets called, its too late: the broadcast has already happened before we bound to it, we missed it. So in that case, we can use CallReplicatedTargetDataDelegateIfSet(): it's going to provide a safeguard to us, as it will force the broadcast of that delegate again in case the replicated target data gets there first and the delegate is broadcast before the server can bind to the target set delegate.
-    - So in Activate() we have different flows based on whether we are client or server. If we are client, we send/replicate the data under the hit result (using FGameplayAbilityTargetData_SingleTargetHit) to the server (packaged up in a handle called FGameplayAbilityTargetDataHandle), but still nonetheless broadcasting the data right after for local purposes. Instead, if we are the server, and we need to listen/receive data, we bind to our callback. If the data has not arrived yet, no problem we wait, and we will broadcast the delegate when we receive it. Otherwise, if the data already arrived (before we bound to the delegate), our callback will never execute, to address this case we call CallReplicatedTargetDataDelegatesIfSet(), which will first check if the data have already been received, if so, it will re-broadcast the delegate, so we can get our callback finally executed.
-    - In C++ we therefore set the rotation of the projectile direction (mouse data received - spawn location of the projectile), and then pass it to SpawnProjectile in BP. We also added the possibility of using the shift button to move and fire simultaneously and moreover to avoid running towards the enemy if we missclick slightly next to him when trying to fire. Finally, we use Motion Warping to make Aura rotate towards the fire direction, setting the Motion Warping component in AuraCharacter, setting it in the track of the firebolt Animation Montage, and finally setting its warp location in the BP, calling a function on casted ICombatInterface (to avoid making the spell dependent on the character).
-    - We add the Impact effect and sound to get triggered at impact time, and looping hissing sound to be added in the animation montage. We also coded the case in which the SphereOverlap for the impact could happen before/after the replication to the client, using HasAuthority to ensure the sounds and/or effects apply on the client in any case too. We then created a custom collision channel (in Project Settings, called Projectile) that is set by default to ignore everyone, except beacons and enemies. Indeed it must pass through potions, and that is what we set manually for all the actors interested (remembering to set Generate Overlap Events to true). In C++ instead, we defined in a #define statement in Aura.h.
-    - Damage GE is created, assigned to a SpecHandle (created in AuraProjectileSpell) in BP, and passed to AuraProjectile at spawn time between the Spawn Deferred and the FinishSpawning for the reasons mentioned above. It is then applied server-side only at overlap time in AuraProjectile, when we impact with the enemy. In the meantime, to see the effects of the GE, we temporarily use the same self-assigned attributes Aura has to the enemies, subtracting to them a float of 10 from the Health.
-    - We create a Widget for enemies health bar (WBP_ProgressBar will be the base class, all will inherit from here), using the Enemy class itself as a widget controller. From the OverlayWidgetController class we simply use/steal the delegate that was created for Attribute change, and bind that delegate in BeginPlay, with a lambda associated that will broadcast the new value. The actual health bar change happens in newly created WBP_Progressbar, assigning the return value of the broadcast to the SetPercent function of the widget.
-    - Ghost bar is entirely done in BP. We interpolate with a delay every tick, and we use a timer that resets to hide the entire bar when the enemy is not being hit for a parametrized time. We also start (Pre Construct) with the bar set to hidden.
+## Ability Tasks
+
+### Ability Task Fundamentals
+
+**Purpose**: Ability Tasks are worker objects that execute asynchronous/periodic operations during Gameplay Ability execution.
+
+**Example**: `PlayMontageAndWait` - Integrates animation playback with event-driven execution flow
+- Available in both Blueprint and C++
+- Provides delegate callbacks: OnCompleted, OnCancelled, OnInterrupted, etc.
+- **Design Benefit**: Couples animation timing with ability logic without manual frame-by-frame checking
+
+### Animation-Driven Ability Timing
+
+**Challenge**: Spawn projectile at precise animation moment (staff fully extended).
+
+**Solution**: Animation Notify system integrated with Gameplay Events.
+
+**Implementation Flow**:
+1. Create custom `AnimNotify` subclass (`MontageEvent`)
+2. Override `ReceiveNotify()` to send Gameplay Event with `FireBolt` tag
+3. Place notify at exact montage frame
+4. In GA Blueprint: `WaitGameplayEvent` node listens for `FireBolt` tag
+5. On `EventReceived` pin: Execute `SpawnProjectile()`
+
+**Design Rationale**: Decouples ability logic from animation frame numbers. Animators control timing; programmers define behavior. Animation changes don't require code updates.
+
+### Client-Server Target Data Replication
+
+**Challenge**: Mouse cursor location is client-side data not automatically replicated to server.
+
+**Problem**: Server must spawn projectiles (authority), but lacks client's cursor position.
+
+**Naive Approach Fails**: Simply sending cursor data via RPC introduces race condition:
+- If `Activate()` called before RPC arrives → spawns with invalid data
+- If RPC arrives before `Activate()` called → delegate broadcast missed
+
+### GAS Target Data System
+
+**FGameplayAbilityTargetData**: Parent struct for various target data types.
+
+**FGameplayAbilityTargetData_SingleTargetHit**: Encapsulates single hit result (location, actor, component, etc.).
+
+**FGameplayAbilityTargetDataHandle**: Container for target data, enables replication.
+
+**ServerSetReplicatedTarget()**: Built-in RPC for sending target data client → server.
+
+**AbilityTargetDataMap**: Server-side map `(AbilitySpec → TargetData)`
+- Stores target data as it arrives via RPC
+- Persists data across ability activation timing
+
+**FAbilityTargetDataSetDelegate**: Delegate broadcast when target data is set on server.
+
+### Race Condition Solution
+
+**Two Timing Scenarios**:
+
+**Scenario A**: `Activate()` called before target data arrives
+1. Server calls `Activate()`
+2. Binds to `TargetSetDelegate`
+3. Target data arrives via RPC
+4. Delegate broadcasts → bound callback executes ✓
+
+**Scenario B**: Target data arrives before `Activate()` called
+1. Target data arrives via RPC
+2. Delegate broadcasts (no listeners yet)
+3. Server calls `Activate()`
+4. Binds to delegate (too late, broadcast already happened) ✗
+
+**CallReplicatedTargetDataDelegatesIfSet() Safeguard**:
+- Checks if target data already exists in `AbilityTargetDataMap`
+- If present: Re-broadcasts delegate immediately
+- Ensures callback executes regardless of arrival timing
+
+### Activate() Implementation Pattern
+
+**Client Path**:
+1. Package cursor hit result into `FGameplayAbilityTargetData_SingleTargetHit`
+2. Wrap in `FGameplayAbilityTargetDataHandle`
+3. Send to server via `ServerSetReplicatedTarget()`
+4. Broadcast locally for client-side prediction/feedback
+
+**Server Path**:
+1. Bind callback to `TargetSetDelegate`
+2. Call `CallReplicatedTargetDataDelegatesIfSet()`
+   - If data already arrived: Immediately re-broadcasts delegate
+   - If data not arrived: Waits for RPC, broadcasts when received
+
+**Why This Works**: Covers both timing scenarios with single safeguard call. No race condition possible.
+
+### Projectile Direction Calculation
+
+**Implementation** (in C++):
+- Calculate rotation: `MouseHitLocation - ProjectileSpawnLocation`
+- Pass rotation to Blueprint's `SpawnProjectile()` function
+- **Separation of Concerns**: C++ handles calculation, Blueprint handles visual spawning setup
+
+### Enhanced Movement Controls
+
+**Shift + Click**: Move and fire simultaneously without stopping.
+
+**Targeting Tolerance**: Prevents accidental movement when clicking near (but not on) enemies during attack.
+
+**Design Goal**: Reduce player frustration from input ambiguity in fast-paced combat.
+
+### Motion Warping Integration
+
+**Purpose**: Smoothly rotate character toward projectile fire direction during cast animation.
+
+**Setup**:
+1. Add `MotionWarpingComponent` to AuraCharacter
+2. Configure warping in FireBolt animation montage track
+3. Set warp target location in Blueprint via `ICombatInterface`
+
+**Interface Usage**: Keeps spell code character-agnostic. Different characters can override warp behavior without modifying spell.
+
+### Impact Effects & Audio
+
+**Visual/Audio Elements**:
+- Impact effect and sound on projectile collision
+- Looping hissing sound during projectile flight (in animation montage)
+
+**Replication Timing Challenge**: Sphere overlap may occur before/after client replication.
+
+**Solution**: Authority checks ensure effects play on clients regardless of replication timing.
+```cpp
+if (HasAuthority()) {
+    // Server plays effects
+}
+// Client also plays effects independently
+```
+
+### Custom Collision Configuration
+
+**Projectile Collision Channel**: Custom channel in Project Settings
+- Default: Ignore all
+- Block: Pawns, Enemies
+- Ignore: Pickups, world static geometry (for visual effects)
+
+**Actor Setup**: Manually configure overlap response per actor type, enable "Generate Overlap Events."
+
+**Code Integration**: Define collision channel constant in `Aura.h` using `#define` for easy reference.
+
+### Damage Application Architecture
+
+**Gameplay Effect Assignment**:
+1. Create Damage GE in editor
+2. Assign to `SpecHandle` in `AuraProjectileSpell` Blueprint
+3. Pass to `AuraProjectile` during deferred spawn
+4. **Timing**: Between `SpawnActorDeferred()` and `FinishSpawning()`
+
+**Application Point**: Server-side only, on sphere overlap with enemy.
+
+**Temporary Visualization**: Self-applied attribute initialization on enemies allows instant health reduction testing (subtract 10 from Health).
+
+### Enemy Health Bar System
+
+**Widget Architecture**:
+- **WBP_ProgressBar**: Base class for all progress bars
+- Enemy-specific health bar inherits from base
+
+**Controller Pattern Reuse**: Enemy class acts as its own widget controller.
+
+**Delegate Reuse**: "Borrow" attribute change delegate from `OverlayWidgetController`.
+
+**Binding Flow** (in Enemy BeginPlay):
+- Bind attribute change delegate
+- Lambda captures widget reference
+- Broadcasts new health value on change
+- Widget's `SetPercent()` receives broadcast
+
+**Design Benefit**: Avoids duplicating delegate infrastructure. Single attribute system serves both player UI and enemy health bars.
+
+### Ghost Bar (Delayed Health Visual)
+
+**Purpose**: Shows previous health value with delay, creating visual lag effect.
+
+**Implementation** (Blueprint only):
+- Interpolate health value every tick with delay timer
+- Reset timer on each damage event
+- Hide bar after parameterized inactivity period
+- Initialize hidden in `PreConstruct`
+
+**Design Choice**: Pure Blueprint for rapid visual tuning without recompilation. Artists can adjust timing/interpolation curves independently.
+
+---
