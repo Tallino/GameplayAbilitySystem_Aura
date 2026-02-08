@@ -978,3 +978,7 @@ if (HasAuthority()) {
 **Design Choice**: Pure Blueprint for rapid visual tuning without recompilation. Artists can adjust timing/interpolation curves independently.
 
 ---
+
+- RPG Character Classes
+  - We want character classes so that we can have different character types with different initial/primary attributes. For now, we think of 3 different classes: warrior, ranger, elementalist (such as Aura herself). The idea is to create an Enum for each character class, a DataAsset (CharacterClassInfo) with the data for each character class. We will use Curve Tables with many curves for each primary attribute. We will also use GE to initialize primary, secondary and vital. And finally any abilities of each character should be in this Data Asset too, together with Common properties shared for each enemy (Death etc.)
+  - 
