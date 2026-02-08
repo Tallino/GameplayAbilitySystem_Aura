@@ -981,4 +981,4 @@ if (HasAuthority()) {
 
 - RPG Character Classes
   - We want character classes so that we can have different character types with different initial/primary attributes. For now, we think of 3 different classes: warrior, ranger, elementalist (such as Aura herself). The idea is to create an Enum for each character class, a DataAsset (CharacterClassInfo) with the data for each character class. We will use Curve Tables with many curves for each primary attribute. We will also use GE to initialize primary, secondary and vital. And finally any abilities of each character should be in this Data Asset too, together with Common properties shared for each enemy (Death etc.)
-  - 
+  - So in our CharacterClassInfo class, we put two structs (ECharacter enum and FCharacterClassDefaultInfo, the latter with the default Primary values of each class). As public member variables instead, we put (shared) secondary and vital attributes, a map to get the value FCharacterClassDefaultInfo from the key ECharacterClass, and a lookup function for this map. Finally we create our DataAsset blueprint that inherits from this class.
