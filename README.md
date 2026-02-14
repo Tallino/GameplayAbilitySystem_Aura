@@ -979,8 +979,112 @@ if (HasAuthority()) {
 
 ---
 
-- RPG Character Classes
-  - We want character classes so that we can have different character types with different initial/primary attributes. For now, we think of 3 different classes: warrior, ranger, elementalist (such as Aura herself). The idea is to create an Enum for each character class, a DataAsset (CharacterClassInfo) with the data for each character class. We will use Curve Tables with many curves for each primary attribute. We will also use GE to initialize primary, secondary and vital. And finally any abilities of each character should be in this Data Asset too, together with Common properties shared for each enemy (Death etc.)
-  - So in our CharacterClassInfo class, we put two structs (ECharacter enum and FCharacterClassDefaultInfo, the latter with the default Primary values of each class). As public member variables instead, we put (shared) secondary and vital attributes, a map to get the value FCharacterClassDefaultInfo from the key ECharacterClass, and a lookup function for this map. Finally, we create our DataAsset blueprint that inherits from this class.
-  - We create Primary attributes GEs for each class and have them in an Enemy folder. Aura will hold only its personal Primary ones as the secondary and the vital will be shared among everybody. We then assign all of these newly create GEs in the DA_CharacterClassInfo data asset blueprint interface. We then create Curve Tables for each Elementalist/Warrior/Ranger class, and with a curve for each primary attribute inside each CT. We can either right-click "Add Key" and set the pair level-attribute, finally making autointerpolating, or we can use both JSON/CSV files, that can be then imported directly into the CTs (also, the CT can be exported as CSV/JSON files of course). We finally add the modifiers to each GE_Primary_X selecting override and then the coherent class/CT.
-  - Finally, we create a static function in AuraAbilitySystemLibrary from where we can easily initialize default attributes given class and level (by self-applying a GE, with all the usual ContextHandle->SpecHandle etc.). We call this function in AuraEnemy's overriden InitializeDefaultAttributes() in InitAbilityActorInfo. We decided to keep the main reference to the CharacterClassInfo class in the GameModeBase class, and that's from where we get() it during the AuraAbilitySystemLibrary initialization function.
+## RPG Character Classes
+
+### Character Class System Architecture
+
+**Design Goal**: Support multiple character archetypes with distinct starting attributes and abilities.
+
+**Class Types**:
+- **Warrior**: Melee-focused, high Vigor
+- **Ranger**: Ranged physical, high Dexterity  
+- **Elementalist**: Magic caster (e.g., Aura)
+
+**Data-Driven Approach**: Separate class definitions from code using Data Assets and Curve Tables.
+
+### Core Components
+
+**ECharacterClass Enum**: Defines available character classes (Warrior, Ranger, Elementalist).
+
+**CharacterClassInfo Data Asset**: Central repository for all class-specific data.
+
+**Curve Tables**: Per-class progression curves for primary attributes across levels.
+
+**Gameplay Effects**: Class-specific GEs for initializing primary attributes; shared GEs for secondary/vital attributes.
+
+**Ability Grants**: Each class defines starting abilities in Data Asset.
+
+**Common Properties**: Shared across all enemies (death mechanics, common abilities, etc.).
+
+### CharacterClassInfo Structure
+
+**FCharacterClassDefaultInfo Struct**:
+- Contains default primary attribute values for a specific class
+- Defines starting point before level scaling
+
+**Class Member Variables**:
+- Secondary attribute initialization data (shared across classes)
+- Vital attribute initialization data (shared across classes)
+- `TMap<ECharacterClass, FCharacterClassDefaultInfo>` - Maps class enum to default info
+- Lookup function for convenient map access
+
+**Data Asset Blueprint**: `DA_CharacterClassInfo` inherits from `CharacterClassInfo` class, configured in editor.
+
+### Gameplay Effect Organization
+
+**Class-Specific Primary Attribute GEs**:
+- `GE_Primary_Warrior`
+- `GE_Primary_Ranger`
+- `GE_Primary_Elementalist`
+- Stored in Enemy folder (Aura has personal copy)
+
+**Shared Attribute GEs**:
+- Secondary attributes GE (same for all classes)
+- Vital attributes GE (same for all classes)
+- **Design Rationale**: Primary attributes differentiate classes; secondary/vital use shared formulas
+
+**Data Asset Assignment**: All GEs referenced in `DA_CharacterClassInfo` for centralized configuration.
+
+### Curve Table Design for Level Scaling
+
+**Structure**: One Curve Table per class
+- Each CT contains curves for all primary attributes of that class
+- Each curve defines attribute value at each level
+
+**Curve Creation Methods**:
+
+**Manual Entry**:
+1. Right-click → "Add Key"
+2. Set (Level, Attribute Value) pairs
+3. Apply auto-interpolation for smooth curves
+
+**Import from File**:
+- CSV/JSON import for bulk data entry
+- Export to CSV/JSON for external editing/version control
+- **Benefit**: Designers can use Excel for balance tuning, import results
+
+**GE Configuration**:
+- Add modifiers to `GE_Primary_[Class]`
+- Select "Override" magnitude calculation
+- Reference appropriate class Curve Table
+- Choose specific curve within CT
+
+**Why Curve Tables**: Non-linear progression (early levels gain more, late levels diminish) without hardcoded formulas. Balance iteration happens in spreadsheet, not code.
+
+### Initialization System
+
+**AuraAbilitySystemLibrary Static Function**:
+- `InitializeDefaultAttributes(Class, Level)` - Centralized initialization entry point
+- Self-applies appropriate GEs based on class and level
+- Standard GAS flow: Create ContextHandle → Create SpecHandle → Apply to ASC
+
+**Execution Point**: Called in `AuraEnemy::InitializeDefaultAttributes()` during `InitAbilityActorInfo()`.
+
+**Data Source**: `CharacterClassInfo` reference stored in **GameModeBase**
+- **Why GameMode**: Global, server-authoritative, accessible from any actor
+- Library fetches Data Asset from GameMode during initialization
+
+**Enemy Integration**: `AuraEnemy` overrides `InitializeDefaultAttributes()`, calls library function with its class and level.
+
+**Design Benefits**:
+- **Centralized**: Single initialization path for all characters
+- **Data-Driven**: Class balance changes require zero code changes
+- **Scalable**: Adding new classes requires only Data Asset configuration
+- **Authority**: GameMode storage ensures server controls class definitions
+
+**Attribute Application Order** (maintained automatically):
+1. Primary attributes (class-specific via Curve Table)
+2. Secondary attributes (derived from primaries, shared GE)
+3. Vital attributes (derived from secondaries, shared GE)
+
+---
