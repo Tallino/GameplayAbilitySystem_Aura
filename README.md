@@ -1088,3 +1088,7 @@ if (HasAuthority()) {
 3. Vital attributes (derived from secondaries, shared GE)
 
 ---
+
+- Damage
+  - Meta attributes are temporary values (temporary placeholders) that serve to receive all the intermediate calculations that a basic "damage" value should receive, as all the bonus/malus due to armor/level/block/critical hit etc. (remember Meta attributes are NOT replicated). Only at the end of calculations of the Incoming Damage meta attribute, the actual real value will scale from the real attribute.
+  - 
