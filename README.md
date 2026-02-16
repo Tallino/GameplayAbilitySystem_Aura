@@ -1091,4 +1091,5 @@ if (HasAuthority()) {
 
 - Damage
   - Meta attributes are temporary values (temporary placeholders) that serve to receive all the intermediate calculations that a basic "damage" value should receive, as all the bonus/malus due to armor/level/block/critical hit etc. (remember Meta attributes are NOT replicated). Only at the end of calculations of the Incoming Damage meta attribute, the actual real value will scale from the real attribute. So we create a new attribute (IncomingDamage) and in PostGameplayEffectExecute we subtract it from the Health. Now GE_Damage affects IncomingDamage attribute
-  - We now want the value of damage caused not to be hardcoded but to be SetByCaller: 
+  - We now want the value of damage caused not to be hardcoded but to be SetByCaller: we set that in the GE editor, and it is something that is passed within the SpecHandle of the GE: we create a Damage Tag and it is passed in the SpecHandle thanks to AssignTagSetByCallerMagnitude, which associates a key-value pair to the SpecHandle (key is the Damage Tag, value will be the Damage value). This permits a SpecHandle to bring along more key-value pairs of tag-value.
+  - 
