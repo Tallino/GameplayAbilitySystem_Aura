@@ -1089,14 +1089,182 @@ if (HasAuthority()) {
 
 ---
 
-- Damage
-  - Meta attributes are temporary values (temporary placeholders) that serve to receive all the intermediate calculations that a basic "damage" value should receive, as all the bonus/malus due to armor/level/block/critical hit etc. (remember Meta attributes are NOT replicated). Only at the end of calculations of the Incoming Damage meta attribute, the actual real value will scale from the real attribute. So we create a new attribute (IncomingDamage) and in PostGameplayEffectExecute we subtract it from the Health. Now GE_Damage affects IncomingDamage attribute
-  - We now want the value of damage caused not to be hardcoded but to be SetByCaller: we set that in the GE editor, and it is something that is passed within the SpecHandle of the GE: we create a Damage Tag, and it is passed in the SpecHandle thanks to AssignTagSetByCallerMagnitude, which associates a key-value pair to the SpecHandle (key is the Damage Tag, value will be the Damage value). This permits a SpecHandle to bring along more key-value pairs of tag-value.
-  - We use scalableFloat in Damage GE class that uses a CT to decide how much damage it causes at which level. Then we simply call GetValueAtLevel(GetAbilityLevel()) to get the ScaledDamage and pass it inside AssignTagSetByCallerMagnitude to apply the damage that we want in the SpecHandle (in ProjectileSpell implementation file)
-  - We now want the enemy to react to Hit Damage. We make a GE_HitReact that applies a HitReact tag. We bind to delegates that react when Tag Count change, and in turn we trigger a function that stops the enemy movement when hit. Finally, for playing the anim montage, we store the HitReactMontage in the Combat Interface (so that both derived Aura and Enemy each have their montage), and then via blueprint we PlayMontageAndWait (in GA_HitReact).
-  - We save the tag in a CommonAbilities array stored in the CharacterClassInfo data asset. These tags are assigned at startup time in Enemy class, calling a static function in the AuraAbilitySystemLibrary class. Finally, we simply Activate the ability in the attribute set, when taking incoming damage and checking if this damage is not fatal (the Tag is statically added in the editor to the GA)
-  - Regarding death, we trigger it in the AttributeSet fatal damage check (as before), and the functions are declared (pure) in CombatInterface. Both Enemy and Character have quite the same implem, which is not an animation, rather it is the detachment of the weapon + ragdoll enabling. We also add a dissolve effect that gets called right after death that triggers two timelines (one for dissolving the character, one for the weapon). These timelines are implemented in BP and use the already existing dissolving material.
-  - We want some text to be shown when hit occurs: we create a Widget blueprint for the text, animate it and play the anim, then in cpp we create a DamageTextComponent class just for the SetDamageText: we will call it later on, but we implement in BP; it will then call another setter (UpdateDamageText) created inside the WBP that actually does the SetText(). So we call SetText (under another name) in AuraAttributeSet, passing in the incoming damage and the TargetCharacter, but the final call will actually be on the PlayerController, who will be in charge of spawning the widget, attaching it to the target and finally setting the damage number text.
-  - UGameplayEffectExecutionCalculation is the class we will use to calculate damage based on attributes. It has several perks, such as the capability of changing more than one attribute, can have programmer logic. Regarding snapshotting of attributes, we will not use it on the target: for them, the value is captured on effect application only. We will also use SetByCaller Magnitude to apply in the GE spec just as done before.
-  - So we create a cpp class inheriting from UGameplayEffectExecutionCalculation, and overriding the Execute_Implementation function allows us to store much important information regarding the calculation such as Source/Target ASC/Actor and the Owning (GE) Spec. In the implementation, we create a static struct from where we can exploit some macros that generate definitions for the attributes we want to capture (thanks to AttemptCalculateCapturedAttributeMagnitude). Finally, we apply the execution with AddOutputModifier called on input param OutExecutionOutput (remember then, in GE_Damage, to assign this class to the Execution section under Modifiers). Adding armor to target armor is just an example, but the implications of this are massive as it allows us to perform arbitrarily complex calculations capturing any attribute we want and modifying, based on that, any other target attribute we want.
-  - So now we use GetSetByCallerMagnitude to get the magnitude of our attribute, set by the caller: so the one that was attached by us to the spec inside AuraProjectileSpell. And then that's how we implement BlockChance: we capture the target BlockChance, generate a random number and compare it against the BlockChance: if it is less, the damage is halved. Same reasoning behind Armor and ArmorPenetration, which ignores a percentage of the target's armor. For these last calculations, we want to ultimately multiply them for non-hardcoded coefficients: so we create a CurveTable with the coefficient values per level, store them into CharacterClassInfo data asset, write a static getter for the CharacterClassInfo in AuraAbilitySystemLibrary and use it inside the Calc class to get the coefficients based on the Source (or Target) level. Same for HitChance, HitDamage and HitResistance.
+## Damage
+
+### Meta Attributes Concept
+
+**Purpose**: Temporary calculation placeholders for complex damage formulas.
+
+**Why Meta Attributes**:
+- Receive intermediate calculations (armor reduction, critical hits, blocks, level scaling)
+- NOT replicated (performance optimization for transient data)
+- Final value transfers to actual replicated attribute after all calculations complete
+
+**IncomingDamage Meta Attribute**:
+- Accumulates all damage modifiers before application
+- Subtracted from Health in `PostGameplayEffectExecute()`
+- `GE_Damage` modifies IncomingDamage, not Health directly
+
+**Design Benefit**: Separates damage calculation complexity from Health attribute. Enables multiple damage modifiers to compose before final application.
+
+### SetByCaller Damage System
+
+**Problem**: Hardcoded damage values prevent dynamic scaling and ability-specific damage.
+
+**Solution**: SetByCaller magnitude system - runtime damage assignment via Gameplay Tags.
+
+**Implementation Flow**:
+1. Create Damage Gameplay Tag
+2. In GE editor: Configure modifier magnitude as "Set By Caller"
+3. In ability code: Call `AssignTagSetByCallerMagnitude(SpecHandle, DamageTag, DamageValue)`
+4. SpecHandle carries tag-value pairs throughout execution
+
+**Scalable Float Integration**:
+- GE_Damage uses Curve Table for level-based damage scaling
+- Call `GetValueAtLevel(GetAbilityLevel())` to retrieve scaled damage
+- Pass result to `AssignTagSetByCallerMagnitude()`
+
+**Benefits**: 
+- One GE supports all abilities (damage value varies per ability)
+- Level scaling handled via Curve Table
+- Multiple damage types via different tags on same spec
+
+### Hit Reaction System
+
+**GE_HitReact**: Applies HitReact tag when damage lands.
+
+**Tag Count Delegate Binding**: Monitors HitReact tag addition/removal.
+
+**Reaction Flow**:
+1. Damage applied → HitReact tag granted
+2. Delegate triggers → Enemy movement stops
+3. Animation plays via `ICombatInterface::GetHitReactMontage()`
+4. Blueprint executes `PlayMontageAndWait` in `GA_HitReact`
+
+**Interface Design**: `ICombatInterface` stores montage reference
+- Aura and Enemy each define class-specific montages
+- Ability code remains character-agnostic
+
+**Ability Assignment**:
+- HitReact ability stored in `CommonAbilities` array (CharacterClassInfo Data Asset)
+- Granted at startup via `AuraAbilitySystemLibrary` static function
+- Activated in AttributeSet when IncomingDamage is non-fatal
+
+**Why Common Abilities**: Shared behaviors (hit react, death) don't need per-class definitions.
+
+### Death System
+
+**Trigger Point**: AttributeSet's fatal damage check (IncomingDamage ≥ Health).
+
+**ICombatInterface Death Functions**: Pure virtual functions implemented by Character and Enemy.
+
+**Death Sequence** (not animation-based):
+1. Detach weapon from character
+2. Enable ragdoll physics
+3. Trigger dissolve effect
+
+**Dissolve Effect**:
+- Two timelines: Character dissolve + Weapon dissolve
+- Implemented in Blueprint using existing dissolve material
+- Timelines control material parameters over time
+
+**Design Choice**: Blueprint timelines allow VFX artists to tune dissolve timing/curves without code changes.
+
+### Damage Text Widget System
+
+**Widget Architecture**:
+- Create damage number widget Blueprint
+- Animate appearance/fade in widget designer
+- Play animation on spawn
+
+**DamageTextComponent**:
+- Custom component with `SetDamageText()` function
+- Blueprint implementation calls `UpdateDamageText()` on widget
+- **Separation**: C++ defines interface, Blueprint handles visual presentation
+
+**Spawning Flow**:
+1. `AuraAttributeSet` detects incoming damage
+2. Calls `SetDamageText()` with damage value and target character
+3. Forwards to **PlayerController** (not AttributeSet directly)
+4. PlayerController spawns widget at target location
+5. Attaches widget to target character
+6. Sets damage text value
+
+**Why PlayerController**: 
+- Client-side UI responsibility
+- Ensures damage numbers appear for local player even with network latency
+- Separates gameplay logic (AttributeSet) from presentation (UI)
+
+### Gameplay Effect Execution Calculation
+
+**UGameplayEffectExecutionCalculation**: Advanced damage calculation class enabling complex, multi-attribute formulas.
+
+**Advantages over Simple Modifiers**:
+- Modify multiple attributes simultaneously
+- Implement arbitrary programmer logic (conditionals, random chance, complex math)
+- Capture source and target attributes for comparative calculations
+
+**Snapshotting Decision**: NOT used on target attributes
+- Target values captured at effect application time, not ability activation
+- Ensures current armor/resistances apply, not values from cast start
+
+**SetByCaller Integration**: Still uses SetByCaller magnitude for base damage input.
+
+### Execution Calculation Implementation
+
+**Class Setup**:
+- Inherit from `UGameplayEffectExecutionCalculation`
+- Override `Execute_Implementation()`
+
+**Captured Data Access**:
+- Source ASC, Actor
+- Target ASC, Actor
+- Owning GE Spec
+
+**Attribute Capture Pattern**:
+- Define static struct with attribute capture macros
+- Use `AttemptCalculateCapturedAttributeMagnitude()` to retrieve captured values
+- Enables compile-time validation of captured attributes
+
+**Output Application**:
+- Call `AddOutputModifier(OutExecutionOutput, Attribute, Value)` for each modified attribute
+- **GE Configuration**: Assign execution class in GE_Damage under "Execution" section of Modifiers
+
+**Example Use**: Modify IncomingDamage based on target's Armor
+- **Implication**: Arbitrarily complex formulas across any captured attributes
+
+### Complex Damage Formula Implementation
+
+**Base Damage**: Retrieved via `GetSetByCallerMagnitude()` from spec (set in AuraProjectileSpell).
+
+**Block Chance**:
+1. Capture target's BlockChance attribute
+2. Generate random float [0.0, 1.0]
+3. If random < BlockChance: Halve damage
+4. **Design**: Probabilistic mitigation encouraging defensive builds
+
+**Armor Penetration**:
+- Capture source's ArmorPenetration and target's Armor
+- Calculate effective armor: `Armor × (1 - ArmorPenetration%)`
+- Reduce damage based on effective armor
+- **Design**: ArmorPen soft-counters high-armor targets without nullifying armor entirely
+
+**Coefficient Scaling**:
+- Store coefficient Curve Tables in CharacterClassInfo Data Asset
+- Access via `AuraAbilitySystemLibrary` static getter
+- Retrieve coefficient based on Source/Target level
+- Apply to armor, penetration, block calculations
+
+**Critical Hit System**:
+- Capture source's CriticalHitChance, CriticalHitDamage
+- Capture target's CriticalHitResistance
+- **Effective Crit Chance**: `CritChance - CritResistance`
+- If random < Effective Crit Chance: `Damage × (1 + CritDamage%)`
+
+**Design Benefits**:
+- **Data-Driven**: Balance tuning via Curve Tables
+- **Level Scaling**: Coefficients adjust with character progression
+- **Extensible**: New damage modifiers integrate without refactoring existing formulas
+- **Stat Interplay**: Offensive stats counterbalance defensive stats naturally
+
+---
