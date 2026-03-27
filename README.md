@@ -1268,3 +1268,8 @@ if (HasAuthority()) {
 - **Stat Interplay**: Offensive stats counterbalance defensive stats naturally
 
 ---
+
+- Advanced Damage Techniques
+  - Gameplay Effect Context (thanks to its Handle) is a really strong class/tool to bring along a lot of important information regarding the GE we are applying, but it is not enough for the information that we actually want to store and pass through: that's why we will subclass it and make our own custom Gameplay Effect Context.
+  - So in our own AuraAbilityTypes, we inherit from GameplayEffectTypes and create our own GameplayEffectContext struct, creating getters and setters for CriticalHit and BlockedHit (which are our objective and reason for all of this), and overriding also GetScriptStruct and NetSerialize.
+  - NetSerialize is the function in charge of serializing (so transforming into bits) the struct/info we want to send over through the network. 
