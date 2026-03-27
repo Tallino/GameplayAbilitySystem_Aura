@@ -1,6 +1,5 @@
 // Copyright Tritaghiaccio Games S.r.l
 
-
 #include "AbilitySystem/AuraAbilitySystemGlobals.h"
 
 #include "AuraAbilityTypes.h"
