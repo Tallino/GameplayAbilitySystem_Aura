@@ -17,19 +17,11 @@ public:
 	static const FAuraGameplayTags& Get() { return GameplayTags; }
 	static void InitializeNativeGameplayTags();
 
-	/*
-	 * Primary Attributes
-	 */
-
 	FGameplayTag Attributes_Primary_Strength;
 	FGameplayTag Attributes_Primary_Intelligence;
 	FGameplayTag Attributes_Primary_Resilience;
 	FGameplayTag Attributes_Primary_Vigor;
-
-	/*
-	 * Secondary Attributes
-	 */
-
+	
 	FGameplayTag Attributes_Secondary_Armor;
 	FGameplayTag Attributes_Secondary_ArmorPenetration;
 	FGameplayTag Attributes_Secondary_BlockChance;
@@ -41,9 +33,10 @@ public:
 	FGameplayTag Attributes_Secondary_MaxHealth;
 	FGameplayTag Attributes_Secondary_MaxMana;
 
-	/*
-	 * Input Tags
-	 */
+	FGameplayTag Attributes_Resistance_Fire;
+	FGameplayTag Attributes_Resistance_Lightning;
+	FGameplayTag Attributes_Resistance_Arcane;
+	FGameplayTag Attributes_Resistance_Physical;
 	
 	FGameplayTag InputTag_LMB;
 	FGameplayTag InputTag_RMB;
@@ -54,10 +47,14 @@ public:
 
 	FGameplayTag Damage;
 	FGameplayTag Damage_Fire;
-
-	TArray<FGameplayTag> DamageTypes;
+	FGameplayTag Damage_Lightning;
+	FGameplayTag Damage_Arcane;
+	FGameplayTag Damage_Physical;
+	
+	TMap<FGameplayTag, FGameplayTag> DamageTypesToResistances;
 	
 	FGameplayTag Effects_HitReact;
+	
 private:
 	static FAuraGameplayTags GameplayTags;
 };
