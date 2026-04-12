@@ -1269,13 +1269,158 @@ if (HasAuthority()) {
 
 ---
 
-- Advanced Damage Techniques
-  - Gameplay Effect Context (thanks to its Handle) is a really strong class/tool to bring along a lot of important information regarding the GE we are applying, but it is not enough for the information that we actually want to store and pass through: that's why we will subclass it and make our own custom Gameplay Effect Context.
-  - So in our own AuraAbilityTypes, we inherit from GameplayEffectTypes and create our own GameplayEffectContext struct, creating getters and setters for CriticalHit and BlockedHit (which are our objective and reason for all of this), and overriding also GetScriptStruct and NetSerialize.
-  - NetSerialize is the function in charge of serializing (so transforming into bits) the struct/info we want to send over through the network. It uses bitwise OR and left shifts to save bits into a uint8 RepBit, where each flipped bit represents if one of the booleans of NetSerialize should be replicated or not. In case we are not saving (therefore we are loading), we simply use bitwise AND with left shift to compare/check if specific bits are 1 or not (so if their corresponding booleans are to be replicated or not): in case they are, the corresponding value stored in the archive is saved into the boolean thanks to the << overload of NetSerialize that makes it work both ways. This is how we will be sending over our CriticalHit and BlockedHit booleans.
-  - We also make use of some important enums taken from TStructOpsTypeTraits (WithNetSerializer and WithCopy) to set to true, and Duplicate() function also overriden. Now, we need the game to use our custom Gameplay Effect Context: we create our AuraAbilitySystemGlobals (inheriting from AbilitySystemGlobals) and override AllocGameplayEffectContext() where we simply return our derived class. This function is what is called when we call CreateEffectContext(). Ultimately, we also add a few lines in DefaultGame.ini
-  - So in AuraAbilitySystemBlueprintLibrary we create getters and setters for our 2 booleans taking them directly from the GE context. We call the setters in CalcDamage when we calculate if we get a block/crit, and we call the getters in PostGameplayEffect in AttributeSet in order to be able to manipulate the text based on the booleans. These booleans will be indeed passed through to the Damage Component class and then to the BP implementation of the SetText function.
-  - In BP, we create several branches with different text colours for each possible combination of block/critical (so 4 different colours). We also want to show a message in one of these cases: we do the same in the BP of WBP_DamageText with a dedicated function and the same branch structure of the text color.
-  - Now we want to implement the concept of Damage types: we create a new subclass of AuraGameplayAbilities (AuraDamageGameplayAbilities) and make AuraProjectileSpell inherit from that. It will contain a map (DamageTypes) between Tags representing the damage types that the GA holds and the floats/damage values associated to that damage type (map that will be filled in the editor). Fire gameplay tag (our first damage type) will be part of a similar array in the static gameplay tags singleton. Now this is where we will get the damage value now, so changing the code in ProjectileSpell (to inject the new damage in SetByCallerMagnitude) and in CalcDamage (to retrieve it by looping in the singleton's array and for each of these that are found in SetByCallerMagnitude, add their value to the Damage).
-  - Now we want to implement resistances to those damage types: so we create other 3 new damage types and 3 new resistances to those damage types (so in total: Fire, Lightning, Arcane, Physical) as tags in the singleton, and the previously created array now becomes map between tags (damage type to resistance). Then we create the attributes with RepNotifiers etc., add them to our TagsToAttributes map, add them in the editor (GE_Secondary_Attributes, based off resilience) and finally adding them to the WBP_AttributeMenu (and setting their row tags).
-  - Now we create a map in ExecCalcDamage that maps GameplayTags to AttributeDefs. We capture all resistances types from the target, and in the DamageTypesToResistances loop we check for which Resistances the target has with respect to our damage type, and reduce the damage consequently.
+## Advanced Damage Techniques
+
+### Custom Gameplay Effect Context
+
+**Limitation**: Base `FGameplayEffectContext` lacks storage for custom combat data (critical hits, blocks, damage sources).
+
+**Solution**: Subclass `FGameplayEffectContext` to add project-specific information.
+
+**AuraGameplayEffectContext** (in AuraAbilityTypes):
+- Inherits from `FGameplayEffectContext`
+- Adds boolean fields: `bIsCriticalHit`, `bIsBlockedHit`
+- Implements getters/setters for custom data
+- Overrides `GetScriptStruct()` - Returns custom struct type for reflection
+- Overrides `NetSerialize()` - Custom network serialization
+- Overrides `Duplicate()` - Proper copying for instanced contexts
+
+### Network Serialization with Bit Packing
+
+**NetSerialize() Purpose**: Convert struct data to bits for efficient network transmission.
+
+**Bit Packing Strategy**:
+- Use single `uint8 RepBits` to store multiple boolean flags
+- Each bit represents one boolean's replication status
+- **Benefits**: 8 booleans in 1 byte vs. 8 bytes for naive approach
+
+**Serialization (Saving)**:
+```cpp
+RepBits |= (bIsCriticalHit ? 1 : 0) << 0;  // Bit 0
+RepBits |= (bIsBlockedHit ? 1 : 0) << 1;   // Bit 1
+```
+
+**Deserialization (Loading)**:
+```cpp
+bIsCriticalHit = (RepBits & (1 << 0)) != 0;  // Check bit 0
+bIsBlockedHit = (RepBits & (1 << 1)) != 0;   // Check bit 1
+```
+
+**Archive Operator Overload**: `<<` operator works bidirectionally
+- Saving: Writes to archive
+- Loading: Reads from archive
+
+**Design Elegance**: Single serialization function handles both directions based on archive mode.
+
+### Struct Traits Configuration
+
+**TStructOpsTypeTraits Enums** (set to true):
+- **WithNetSerializer**: Enables custom `NetSerialize()` function
+- **WithCopy**: Ensures proper copying behavior for instanced data
+
+**Why Required**: Informs Unreal's serialization system about custom requirements, preventing default (incorrect) serialization.
+
+### Registering Custom Context Globally
+
+**AuraAbilitySystemGlobals**:
+- Inherit from `UAbilitySystemGlobals`
+- Override `AllocGameplayEffectContext()`
+- Return instance of `FAuraGameplayEffectContext`
+
+**Integration Point**: `CreateEffectContext()` calls `AllocGameplayEffectContext()` internally.
+
+**DefaultGame.ini Configuration**: Register custom globals class so engine uses it project-wide.
+
+**Design Impact**: All GE contexts throughout the project automatically use custom type without per-context configuration.
+
+### Data Flow: Calculation to UI
+
+**Setting Context Data** (in ExecCalc_Damage):
+- Calculate critical hit result → Call setter on context
+- Calculate block result → Call setter on context
+- Context stored in GE Spec
+
+**Retrieving Context Data** (in AttributeSet::PostGameplayEffectExecute):
+- Extract context from executed GE
+- Call getters for `bIsCriticalHit`, `bIsBlockedHit`
+- Pass booleans to DamageTextComponent
+
+**UI Presentation** (in WBP_DamageText Blueprint):
+- Receive boolean combination (4 states: normal, crit, block, crit+block)
+- Branch to appropriate text color
+- Display corresponding message for special cases
+
+**AuraAbilitySystemBlueprintLibrary**: Provides Blueprint-accessible getters/setters wrapping context functions.
+
+**Design Benefit**: Data flows seamlessly from calculation → context → AttributeSet → UI without losing information across network boundaries.
+
+### Damage Type System
+
+**Architecture Evolution**: Move from single damage value to typed damage system.
+
+**AuraDamageGameplayAbility**: New base class for damage-dealing abilities
+- `TMap<FGameplayTag, float> DamageTypes` - Damage type → magnitude mapping
+- Populated in editor per-ability
+- `AuraProjectileSpell` inherits from this class
+
+**Damage Type Tags** (in GameplayTags singleton):
+- Fire
+- Lightning
+- Arcane
+- Physical
+
+**SetByCaller Integration**:
+- Loop through `DamageTypes` map
+- For each type: Call `AssignTagSetByCallerMagnitude(Spec, TypeTag, Value)`
+- Single spec carries multiple typed damage values
+
+**Calculation Retrieval** (in ExecCalc_Damage):
+- Loop through damage type tags
+- For each: Call `GetSetByCallerMagnitude(TypeTag)`
+- Accumulate total damage from all types
+
+**Design Benefits**:
+- Abilities deal multiple damage types simultaneously (e.g., Fire + Physical hybrid attack)
+- Per-type balancing without separate GEs
+- Extensible: New types require only tag creation
+
+### Resistance System
+
+**Resistance Attributes**: Match each damage type
+- FireResistance
+- LightningResistance
+- ArcaneResistance  
+- PhysicalResistance
+
+**Attribute Implementation**:
+- Standard `FGameplayAttributeData` with rep notifiers
+- Added to `TagsToAttributes` map
+- Initialized via `GE_SecondaryAttributes` (derived from Resilience primary attribute)
+- Displayed in WBP_AttributeMenu
+
+**DamageTypesToResistances Map** (in GameplayTags singleton):
+- `TMap<FGameplayTag, FGameplayTag>` linking damage type to corresponding resistance
+- Example: `Damage.Fire` → `Attributes.Resistance.Fire`
+
+**ExecCalc_Damage Integration**:
+- Create local map: `TMap<FGameplayTag, FGameplayAttributeCaptureDefinition>` linking tags to attribute captures
+- Capture all resistance attributes from target
+- For each damage type in incoming damage:
+  1. Look up corresponding resistance tag in `DamageTypesToResistances`
+  2. Retrieve resistance attribute value via map lookup
+  3. Reduce damage: `TypeDamage × (1 - Resistance%)`
+
+**Calculation Flow**:
+```
+Base Fire Damage: 100
+Target Fire Resistance: 30%
+Final Fire Damage: 100 × (1 - 0.30) = 70
+```
+
+**Design Benefits**:
+- **Granular Defense**: Build characters resistant to specific damage types
+- **Strategic Depth**: Encourages diverse damage type usage in abilities
+- **Scalable**: Adding new damage type requires: tag creation, attribute creation, map entry
+- **Data-Driven**: Resistance values initialized via GE and Curve Tables like other attributes
+
+---
