@@ -1424,3 +1424,6 @@ Final Fire Damage: 100 × (1 - 0.30) = 70
 - **Data-Driven**: Resistance values initialized via GE and Curve Tables like other attributes
 
 ---
+
+- Enemy AI
+    - So for AI we will use Behavior Trees (BTs), that will be interchangeable so different enemies may easily swap between them (therefore we will set them in blueprint). AI enemies will also need AI Controllers, which we will create and make owners of newly created BT Components and Blackboard Component. Finally, we will run the BT on Aura Enemy.
