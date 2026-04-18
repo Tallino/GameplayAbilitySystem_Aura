@@ -1426,4 +1426,6 @@ Final Fire Damage: 100 × (1 - 0.30) = 70
 ---
 
 - Enemy AI
-    - So for AI we will use Behavior Trees (BTs), that will be interchangeable so different enemies may easily swap between them (therefore we will set them in blueprint). AI enemies will also need AI Controllers, which we will create and make owners of newly created BT Components and Blackboard Component. Finally, we will run the BT on Aura Enemy.
+    - So for AI we will use Behavior Trees (BTs), that will be interchangeable so different enemies may easily swap between them (therefore we will set them in blueprint). AI enemies will also need AI Controllers, which we will create and make owners of newly created BT Components. Finally, we will run the BT on Aura Enemy.
+    - So AI Enemy initializes BTs and BBs in overriden PossessedBy by calling the correct functions on AuraAIController (that we assigned as the default AI Controller class to it).
+    - 
