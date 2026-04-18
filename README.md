@@ -1427,5 +1427,5 @@ Final Fire Damage: 100 × (1 - 0.30) = 70
 
 - Enemy AI
     - So for AI we will use Behavior Trees (BTs), that will be interchangeable so different enemies may easily swap between them (therefore we will set them in blueprint). AI enemies will also need AI Controllers, which we will create and make owners of newly created BT Components. Finally, we will run the BT on Aura Enemy.
-    - So AI Enemy initializes BTs and BBs in overriden PossessedBy by calling the correct functions on AuraAIController (that we assigned as the default AI Controller class to it).
+    - So AI Enemy initializes BTs and BBs in overriden PossessedBy by calling the correct functions on AuraAIController (that we assigned as the default AI Controller class to it). Then in the BT we assign to a selector node a custom service (BP inheriting from BTS), that we call FindNearestPlayer: in its event graph, we override the Event Receive Tick AI and this tick is where we will actually implement what we want from the service.
     - 
