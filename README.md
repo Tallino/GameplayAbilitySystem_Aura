@@ -1425,12 +1425,129 @@ Final Fire Damage: 100 × (1 - 0.30) = 70
 
 ---
 
-- Enemy AI
-    - So for AI we will use Behavior Trees (BTs), that will be interchangeable so different enemies may easily swap between them (therefore we will set them in blueprint). AI enemies will also need AI Controllers, which we will create and make owners of newly created BT Components. Finally, we will run the BT on Aura Enemy.
-    - So AI Enemy initializes BTs and BBs in overriden PossessedBy by calling the correct functions on AuraAIController (that we assigned as the default AI Controller class to it). Then in the BT we assign to a selector node a custom service (BP inheriting from BTS), that we call FindNearestPlayer: in its event graph, we override the Event Receive Tick AI and this tick is where we will actually implement what we want from the service.
-    - A Blackboard is where we save/store keys (variables) that services running on nodes might assign value to. To find the nearest player, we will use simple tags (FNames, not like gameplay tags), assigned to enemies (tag = Enemy), differentiated from Aura's tag (tag = player): in BP, we simply set the target tag (based on who is NOT the controlled pawn of the service), then look for actors with the target tag. When found, we find the one with the shortest distance, save both the distance and the found actor in variables that we then assign to the blackboard key.
-    - A Decorator can provide condition/if-else like statements if execute a given branch and can also be attached to a selector. So we add several decorators to our BT to check conditions (such as being a ranged attacker or not, being close/far enough to attack etc.), that get they blackboard key values set in cpp, and they are used to decide between ranged attack, melee attacks, or move to the target. We also add an extra movement to a random location around the target in between each attack and the other (BTT_GoAroundTarget that uses GetRandomLocationInNavigableRadius(), and assignes the New Location as blackboard key to the TargetToFollow).
-    - So for ranged attackers, we want them to be smart enough to realize if there is an obstacle in the way before attacking, and in such case, move in order to create a line of sight between them and us. For that, we can use Environment Query System (EQS): it will generate a series of "items" all around the player, and run/loop some user-defined tests on them to see which one applies the best (e.g, we can check which of these items have line of sight to target, and between this subset, we can also choose the closest).
-    - So we create a testing pawn (deriving from EQSTestingPawn) and we assign it an EQ (EnvironmentQuery): the EQ generates spots all around the testing pawn (we may choose to generate spots in a grid, or in a circle etc.), and we can decide how big will the grid be or the distance between each spot in the grid. So we add a Trace test (visibility) and we can choose to filter, filter and score, or only score the items we have. We decide to filter only the items that are visible against the context we create: EQS_PlayerContext, which indeed returns all actors of class Aura.
-    - We add another test: Distance, to the querier, and we score the items: that means that the spots get a score based on the distance between the spots and the querier (so in the case, the pawn/ranged attacker): setting the scoring factor to -1, means the closest spots have the highest score: this is because we want the rangers to move to the closest spot between those who are in line of sight with Aura.
-    - So now we have this EQS up and ready, and we want to use it in BTs: so in the Ranged Attacker selector we add a task of type RunEQSQuery, give it our EQ, and assign the return value (FindRangedAttackPosition) to MoveToLocation. Then, in the same selector, we move to the new location, Attack, wait, etc. Now we have a ranger that always looks for the closes spot from which he can shoot, and therefore can chase us around obstacles.
+## Enemy AI
+
+### Behavior Tree Architecture
+
+**Design Philosophy**: Modular, data-driven AI using Behavior Trees (BTs) for easy swapping between enemy archetypes.
+
+**Core Components**:
+- **Behavior Trees**: Define decision logic, assigned per-enemy in Blueprint
+- **AI Controllers**: Own BT Components and manage execution
+- **Blackboards**: Shared data storage for BT nodes and services
+
+**Initialization Flow** (AuraEnemy):
+- Override `PossessedBy()`
+- Call BT/Blackboard initialization on `AuraAIController`
+- `AuraAIController` set as default AI Controller class in Blueprint
+
+**Design Benefit**: Different enemy types share the same base classes but use different BTs, enabling diverse behaviors without code duplication.
+
+### Behavior Tree Services
+
+**FindNearestPlayer Service**:
+- Custom service (Blueprint inheriting from `BTService`)
+- Attached to selector node in BT
+- Overrides `Event Receive Tick AI` - Service tick function
+
+**Service Execution**: Ticks periodically while node is active, updating Blackboard data.
+
+### Blackboard Data Storage
+
+**Purpose**: Centralized variable storage accessible across all BT nodes and services.
+
+**Key Types**: Support various data types (Actors, Vectors, Floats, Bools, etc.)
+
+**FindNearestPlayer Implementation**:
+1. Determine target tag based on controlled pawn
+   - If AI controls Enemy → search for `Player` tag
+   - If AI controls Player → search for `Enemy` tag
+2. Find all actors with target tag
+3. Calculate distances to each
+4. Store nearest actor and distance in Blackboard keys
+
+**Tag System**: Simple FName tags (not Gameplay Tags)
+- Enemies: Tagged `Enemy`
+- Player: Tagged `Player`
+- **Why FNames**: Lightweight identification for spatial queries
+
+### Behavior Tree Decorators
+
+**Purpose**: Conditional execution - control which BT branch executes based on Blackboard state.
+
+**Decorator Examples**:
+- **Is Ranged Attacker**: Checks enemy archetype
+- **Distance to Target**: Validates proximity for attack
+- **Line of Sight**: Confirms visibility to target
+
+**Configuration**: Decorators read Blackboard keys (set in C++), evaluate conditions in real-time.
+
+**Branch Selection Logic**:
+- Ranged attack path (if ranged + has line of sight)
+- Melee attack path (if melee + close enough)
+- Move to target path (fallback)
+
+**BTT_GoAroundTarget Task**:
+- Calls `GetRandomLocationInNavigableRadius()` around target
+- Assigns result to `TargetToFollow` Blackboard key
+- **Purpose**: Creates organic movement patterns between attacks, prevents static positioning
+
+**Design Benefit**: Decorators provide readable, designer-friendly conditional logic without code.
+
+### Environment Query System (EQS)
+
+**Problem**: Ranged enemies need intelligent positioning - attack from line of sight, reposition when blocked.
+
+**Solution**: EQS generates and evaluates potential positions dynamically.
+
+**EQS Workflow**:
+1. **Generate Items**: Create test positions around target (grid, circle, etc.)
+2. **Run Tests**: Filter and score positions based on criteria
+3. **Return Best**: Select optimal position for AI action
+
+### EQS Configuration
+
+**EQSTestingPawn**: Debug visualization tool
+- Assign Environment Query asset
+- Visualizes generated positions and test results in-editor
+
+**Item Generation**:
+- Pattern types: Grid, Circle, Donut, Custom
+- Parameters: Grid size, spacing between positions, radius
+
+**Trace Test (Visibility)**:
+- Test type: Line-of-sight check
+- Filter mode: **Filter Only** (remove positions without LoS)
+- Context: `EQS_PlayerContext` (returns all Aura actors)
+- **Result**: Only positions with unobstructed view to player remain
+
+**Distance Test**:
+- Test type: Distance to querier (AI pawn)
+- Scoring mode: **Score Only** (rank remaining positions)
+- Scoring factor: **-1** (inverse - closer = higher score)
+- **Result**: Closest viable position scores highest
+
+**Test Composition**: Filtering + Scoring enables "closest position with line of sight" queries in single EQ.
+
+### BT Integration with EQS
+
+**Ranged Attacker Selector**:
+1. **RunEQSQuery Task**: Executes Environment Query
+2. Assigns best position to `MoveToLocation` Blackboard key
+3. **MoveTo Task**: Navigates to `MoveToLocation`
+4. **Attack Task**: Executes ranged attack ability
+5. **Wait Task**: Cooldown before next decision
+
+**Behavior Outcome**: Rangers intelligently reposition around obstacles to maintain line of sight, pursuing player through complex environments.
+
+**Design Benefits**:
+- **Dynamic Positioning**: No hardcoded attack spots
+- **Obstacle Awareness**: Automatically adapts to level geometry
+- **Designer Control**: Artists/designers tune EQS parameters without code
+- **Reusable**: Same EQ applies to all ranged enemy types
+- **Performance**: EQS queries run asynchronously, don't block gameplay thread
+
+**Gameplay Impact**: Creates challenging AI that uses terrain intelligently, forcing players to manage positioning and cover.
+
+---
+
