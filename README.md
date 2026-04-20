@@ -1551,3 +1551,6 @@ Final Fire Damage: 100 × (1 - 0.30) = 70
 
 ---
 
+ - Enemy Melee Attacks
+   - So we create a new subset of Startup abilities in our Character Class default info struct, a new GA (AuraMeleeAttack) deriving from our Damage GAs, and in the editor we assign this GA in the CharacterClassInformation map, as startup abilities of the warrior class only. We also modify the GiveStartupAbilities() in our AuraAbilitySystemLibrary so to loop in this map and GiveAbility() to the ASC. Finally, we assign a tag to the melee attack and in BP we activate the attack ability by ActivateAbilityByTag in the BTT_Attack task of the enemy's BT.
+   - 
