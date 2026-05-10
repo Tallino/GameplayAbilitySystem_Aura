@@ -1551,13 +1551,168 @@ Final Fire Damage: 100 × (1 - 0.30) = 70
 
 ---
 
- - Enemy Melee Attacks
-   - So we create a new subset of Startup abilities in our Character Class default info struct, a new GA (AuraMeleeAttack) deriving from our Damage GAs, and in the editor we assign this GA in the CharacterClassInformation map, as startup abilities of the warrior class only. We also modify the GiveStartupAbilities() in our AuraAbilitySystemLibrary so to loop in this map and GiveAbility() to the ASC. Finally, we assign a tag to the melee attack and in BP we activate the attack ability by ActivateAbilityByTag in the BTT_Attack task of the enemy's BT.
-   - Just like we did for Aura, we add motion warping component to the enemy, Motion Warping anim notify state to its spear-attack animation, and set to rotate towards FacingTarget. In the Enemy BP we call the Add Motion Warping from a blueprint implementable event called UpdateFacingTarget, that will be ultimately called in the GA_MeleeAttack. It will get the FacingTarget from the accessors (defined as Blueprint native in EnemyInterface), with its setter implemented in BTT_AttackTask (we set it from the TargetToFollow blackboard key selector).
-   - So we want to send/respond to a gameplay event of the spear hitting us, we do the same as for the Fire bolt: use AN_MontageEvent blueprint in the goblin spear attack animation, with an event tag Attack.Melee. Then, in GA_MeleeAttack we wait for a gameplay event with that tag, and we generate a sphere on the tip of the spear whenever we attack.
-   - Now we want to find all live players within a sphere: so in our usual AuraGameplayAbilitySystemLibrary we make a blueprint callable function that fills in a vector of overlapping actors inside a given radius (sphere-form). To do this we also added 2 getters functions in the CombatInterface: isDead (we don't want dead players) and GetAvatarActor (the owner).
-   - To cause damage, we create function CauseDamage() in AuraDamageGameplayAbility class, that takes target actor in input. It creates a GameplayEffectSpecHandle, it loops over the DamageTypes map of the ability and for each it sums the given magnitude, finally applying the overall damage to the ASC of the targetActor. The function is then called via BP in GA_MeleeAttack for each overlapping actor (that will be input target actor) in the GetLivePlayerWithinRadius function.
-   - Since we have different enemies that not necessarily have a weapon (e.g, the Ghoul), we want to be able to set its Combat Socket Location based on whether he is attacking from the left or the right side. So we want to be able to retrieve it based on a gameplay tag, which is ultimately related to a montage (as it will influence left or right attack). So we create these 3 new tags for each attack, all with Montage as parent.
-   - So we want a struct that links up a montage and a gameplay tag (a Tagged Montage), to be defined in the CombatInterface, so we can just call a function there for retrieving any Tagged Montages. We want an array of these, so we will include the CombatInterface in AuraCharacterBase. We implement the GetTaggedMontages in AuraCharacter, and we simply return our array of structs that we fill in BP. Finally, in GA_MeleeAttack, we now call GetAttackMontages right before the PlayMontageAndWait, from which we take a random struct, break it up, and assign the montage to be played, and the tag to be given to WaitGameplayEvent (ofc, now the Goblin spear animation sends an event of this new type of tag).
-   - Now what is left is to modify GetCombatSocketLocation so to be able to cope with different enemies, as each of them will have different combat socket locations, that we will identify with the tag. So CombatSocketLocation will need to take a gameplay tag and return the correct socket based on that tag: in AuraCharacterBase.cpp, we basically check which MontageTag are we received, and return the correct socketLocation based on that: for the Ghoul we indeed created 2 sockets on its left and right wrist in its skeletal mesh, whose names are then retrieved from the implementation of the new GetCombatSocketLocation function.
-   - So we create a Ghoul as a new enemy, assigning its socket locations, its Idle/Walk blend space, ABP, tuning its speed etc. (the usual stuff). Then we add motion warping, the AM_MontageEvent notify for the 2 AM (one per arm, with the corresponding tag for each arm), and tune/tweak the values a bit, such as making enemies not hit each other (AuraAbilitySystemLibrary cpp function to call in BP before calling CauseDamage).
+## Enemy Melee Attacks
+
+### Melee Ability Assignment
+
+**Class-Specific Abilities**: Extend CharacterClassDefaultInfo struct with `StartupAbilities` array.
+
+**AuraMeleeAttack Ability**:
+- Inherits from `AuraDamageGameplayAbility`
+- Assigned to Warrior class in `CharacterClassInfo` Data Asset
+
+**Ability Granting** (in AuraAbilitySystemLibrary):
+- Modify `GiveStartupAbilities()` to loop through class-specific abilities
+- Call `GiveAbility()` on ASC for each startup ability
+
+**BT Activation**:
+- Assign Gameplay Tag to melee attack ability
+- `BTT_Attack` task calls `ActivateAbilityByTag()` when condition met
+
+**Design Benefit**: Class-specific abilities defined in data, enabling different enemy types with zero code changes.
+
+### Motion Warping for Melee
+
+**Component Setup**:
+- Add `MotionWarpingComponent` to Enemy class
+- Add Motion Warping AnimNotify State to spear attack animation
+- Configure to rotate toward `FacingTarget`
+
+**Blueprint Implementation**:
+- `UpdateFacingTarget()` - Blueprint implementable event in Enemy
+- Calls `AddMotionWarping()` with target data
+- Called from `GA_MeleeAttack` during ability execution
+
+**Target Acquisition**:
+- `FacingTarget` retrieved via `IEnemyInterface` accessors (Blueprint Native Event)
+- Setter implemented in `BTT_Attack` task
+- Value sourced from `TargetToFollow` Blackboard key
+
+**Design Pattern**: Interface-based communication decouples ability code from enemy implementation details.
+
+### Animation-Driven Damage Application
+
+**Event Notification**: Same pattern as FireBolt projectile
+- `AnimNotify_MontageEvent` placed in spear attack animation
+- Sends Gameplay Event with tag `Attack.Melee`
+
+**GA_MeleeAttack Execution**:
+1. Wait for Gameplay Event (`Attack.Melee` tag)
+2. On event received: Generate damage detection sphere at spear tip
+3. Find overlapping actors within radius
+4. Apply damage to valid targets
+
+### Sphere Overlap Detection
+
+**AuraAbilitySystemLibrary Function**:
+- `GetLivePlayersWithinRadius()` - Blueprint callable, static
+- Parameters: World, origin, radius
+- Returns: Array of overlapping live actors
+
+**Filtering Logic**:
+1. Perform sphere overlap query
+2. For each overlapping actor:
+   - Check `ICombatInterface::IsDead()` - exclude dead actors
+   - Check actor validity
+3. Return filtered list
+
+**Interface Additions**:
+- `IsDead()` - Death state query
+- `GetAvatarActor()` - Retrieve physical actor (handles Owner vs. Avatar distinction)
+
+### Damage Application Architecture
+
+**CauseDamage() Function** (in AuraDamageGameplayAbility):
+- **Input**: Target actor
+- **Process**:
+  1. Create `GameplayEffectSpecHandle`
+  2. Loop through ability's `DamageTypes` map
+  3. Sum magnitudes across all damage types
+  4. Apply accumulated damage to target's ASC via spec
+
+**GA_MeleeAttack Blueprint**:
+- Call `GetLivePlayersWithinRadius()` at damage moment
+- For each overlapping actor: Call `CauseDamage(Actor)`
+
+**Design Benefit**: Single `CauseDamage()` function handles all damage-dealing abilities, reducing code duplication.
+
+### Tagged Montage System
+
+**Problem**: Different enemies attack from different body parts (weapon hand, left/right claws, head, etc.).
+
+**Challenge**: Need dynamic socket location based on attack variation.
+
+**Solution**: Link montages with Gameplay Tags to identify attack type and corresponding socket.
+
+**Montage Tags** (parent: `Montage.*`):
+- `Montage.Attack.Left`
+- `Montage.Attack.Right`  
+- `Montage.Attack.Weapon`
+
+**FTaggedMontage Struct** (defined in ICombatInterface):
+- `UAnimMontage* Montage`
+- `FGameplayTag MontageTag`
+- **Purpose**: Couples animation with semantic identifier
+
+### Tagged Montage Implementation
+
+**AuraCharacterBase**:
+- `TArray<FTaggedMontage> AttackMontages` - Stores all attack variations
+- Populated in Blueprint per-enemy type
+
+**ICombatInterface::GetTaggedMontages()**: Returns montage array for character.
+
+**GA_MeleeAttack Usage**:
+1. Call `GetAttackMontages()` on enemy
+2. Select random montage from array
+3. Extract montage and tag from struct
+4. Play montage with `PlayMontageAndWait`
+5. Pass tag to `WaitGameplayEvent` for timing synchronization
+
+**Animation Notify**: Spear attack animation sends event with montage-specific tag (e.g., `Montage.Attack.Weapon`).
+
+**Design Benefits**:
+- **Variety**: Single ability supports multiple attack animations per enemy
+- **Extensible**: Add new attacks by adding structs in Blueprint
+- **Data-Driven**: Designers configure montages without code
+
+### Dynamic Socket Resolution
+
+**GetCombatSocketLocation() Evolution**: Now accepts Gameplay Tag parameter.
+
+**Implementation** (AuraCharacterBase.cpp):
+- Receive montage tag
+- Switch/case on tag value
+- Return corresponding socket name based on tag
+
+**Example - Ghoul**:
+- Two sockets: `LeftHandSocket`, `RightHandSocket` (configured in skeletal mesh)
+- `Montage.Attack.Left` → returns `LeftHandSocket`
+- `Montage.Attack.Right` → returns `RightHandSocket`
+
+**Goblin Spearman**:
+- Single socket: `WeaponTipSocket`
+- `Montage.Attack.Weapon` → returns `WeaponTipSocket`
+
+**Design Elegance**: Same ability code handles weaponless Ghouls and armed Goblins through tag-based socket resolution.
+
+### Ghoul Enemy Integration
+
+**Setup Checklist**:
+- Create skeletal mesh sockets (left/right wrist)
+- Configure Idle/Walk blend space
+- Assign Animation Blueprint
+- Tune movement speed
+- Add Motion Warping component
+- Create two Attack Montages (left/right arm)
+- Add `AnimNotify_MontageEvent` to each montage with appropriate tag
+- Populate `AttackMontages` array in Blueprint
+
+**Friendly Fire Prevention**:
+- Modify `GetLivePlayersWithinRadius()` to exclude same-faction actors
+- Implementation in `AuraAbilitySystemLibrary` (C++)
+- Called in Blueprint before `CauseDamage()`
+
+**Design Outcome**: Multiple enemy types with varied attack patterns sharing the same ability system through tag-based configuration.
+
+---
