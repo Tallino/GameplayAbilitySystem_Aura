@@ -1718,4 +1718,4 @@ Final Fire Damage: 100 × (1 - 0.30) = 70
 ---
 
 - Enemy Ranged Attacks
-  - So now we need to implement the ranged enemies attacks: 
+  - So now we need to implement the ranged enemies attacks: we create the GA_RangedAttack (from ProjectileSpell), assign it a BP_SlingshotRock (Projectile Class), GE_Damage as DamageEffect class 
