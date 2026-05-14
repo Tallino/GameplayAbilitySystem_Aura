@@ -761,7 +761,7 @@ GAS separates two critical actor references:
 - Populate spline component with path points
 
 **Autorun Execution** (in Tick):
-- Find closest spline point to character
+- Find the closest spline point to character
 - Add movement input toward that point
 - Stop when within `AutoRunAcceptanceRadius` of destination
 
@@ -1716,3 +1716,6 @@ Final Fire Damage: 100 × (1 - 0.30) = 70
 **Design Outcome**: Multiple enemy types with varied attack patterns sharing the same ability system through tag-based configuration.
 
 ---
+
+- Enemy Ranged Attacks
+  - So now we need to implement the ranged enemies attacks: 
