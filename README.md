@@ -1717,7 +1717,65 @@ Final Fire Damage: 100 × (1 - 0.30) = 70
 
 ---
 
-- Enemy Ranged Attacks
-  - So now we need to implement the ranged enemies attacks: we create the GA_RangedAttack (from ProjectileSpell), assign it a BP_SlingshotRock (Projectile Class), GE_Damage as DamageEffect class, and as Damage type map element we select physical damage type tag and a newly created Ranged damage curve in CT_Damage. Then we add the Attack tag to the ability (so the behaviour tree task can find it to activate it), and assign this GA to the Startup abilities of the ranger class (in DA_CharacterClassInfo). Finally, we create the usual AnimMontage with MotionWarping/MontageEvent to send, and assign it in the Tagged Montages map in BP_GoblinSlingshot.
-  - For the montage, we do exactly like for the spear: in GA_RangedAttack BP, we update FacingTarget (for motion warping), we get one of the AttackMontages from our array (we created a BlueprintPure function for this so to avoid messy BP, and we applied it to GA_MeleeAttack too) and play it. We then wait for a gameplay event (tag sent by the AM_Event in the AnimationMontage) so to trigger the shot at the combat socket location at the right moment, by calling SpawnProjectile().
-  - For animating the pouch for the slingshot, we create a new ABP where we first set the OwnerMesh, then from that Mesh we get the transform of a newly created socket on the rightHand. The pouch will start off from that transform thanks to a node called Transform (Modify) Bone. Finally, we use (already existing) AN_Notifies (GrabRock and ReleasePouch) to signal when to set to false or true the HoldingPouch bool, that will determine when to play the Attack animation (when the pouch gets pulled backwards).
+## Enemy Ranged Attacks
+
+### Ranged Attack Ability Setup
+
+**GA_RangedAttack Configuration**:
+- Inherits from `AuraProjectileSpell`
+- **Projectile Class**: `BP_SlingshotRock`
+- **Damage Effect**: `GE_Damage`
+- **Damage Type Map**: Physical damage tag → Ranged damage curve (from `CT_Damage`)
+
+**Ability Assignment**:
+- Add `Attack` tag to ability (enables BT activation via `BTT_Attack`)
+- Assign to Ranger class `StartupAbilities` in `DA_CharacterClassInfo`
+
+**Animation Setup**:
+- Create Attack Montage with `MotionWarping` and `AnimNotify_MontageEvent`
+- Populate `TaggedMontages` array in `BP_GoblinSlingshot` Blueprint
+
+**Design Parallel**: Ranged setup mirrors melee pattern - same ability architecture supports different attack modalities.
+
+### Montage Execution Pattern
+
+**GA_RangedAttack Blueprint Flow**:
+1. Call `UpdateFacingTarget()` - Sets motion warping target
+2. Call `GetRandomAttackMontage()` - Retrieves montage from array
+   - **Blueprint Pure Function**: Reduces graph complexity
+   - **Applied Retroactively**: Also integrated into `GA_MeleeAttack` for consistency
+3. Play montage with `PlayMontageAndWait`
+4. Wait for Gameplay Event (tag sent by `AnimNotify_MontageEvent`)
+5. On event received: Call `SpawnProjectile()` at combat socket location
+
+**Design Benefit**: Unified execution flow across melee and ranged attacks - only projectile spawning differs.
+
+### Slingshot Pouch Animation System
+
+**Challenge**: Animate slingshot pouch dynamically as it's pulled back and released.
+
+**Animation Blueprint Approach**:
+1. Get `OwnerMesh` reference
+2. Retrieve `RightHandSocket` transform from mesh
+3. Use **Transform (Modify) Bone** node to position pouch relative to hand socket
+4. Bind pouch position to hand socket transform
+
+**Animation State Control**:
+- **AnimNotify_GrabRock**: Triggers when character grabs ammunition
+- **AnimNotify_ReleasePouch**: Triggers when projectile is launched
+
+**HoldingPouch Boolean**:
+- Set `false` by `GrabRock` notify
+- Set `true` by `ReleasePouch` notify
+- Controls attack animation blend (pulling back vs. idle)
+
+**Animation Logic**:
+- `HoldingPouch == true` → Play pouch pullback animation
+- `HoldingPouch == false` → Return pouch to rest position
+
+**Design Benefit**: 
+- **Dynamic**: Pouch follows hand socket automatically through all animations
+- **Reusable**: Same ABP pattern applies to any multi-stage ranged weapon (bows, crossbows)
+- **Designer-Friendly**: Animation timing controlled via notifies in animation editor, not code
+
+---
