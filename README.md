@@ -1780,6 +1780,43 @@ Final Fire Damage: 100 × (1 - 0.30) = 70
 
 ---
 
-- Enemy Spell Attacks
-  - We want a Shaman too (class will be elementalist), so we create the class, blend-space, ABP etc., then the usual montage with the Motion Warping, the AM_Event to send the Attack Montage tag (in BP_Shaman also to add the tagged montage pair of the montage + that tag), and finally adding the TipSocket to the staff too. Finally, we will make it shoot a fire bolt (so we use the same GA as parent, only modifying some parameters), also adding sounds.
-  - We then just finish by adding a Dead blackboard key to enemies' behaviour tree so to fix a bug + we add dissolve effect to the Shaman.
+## Enemy Spell Attacks
+
+### Shaman Enemy Setup
+
+**Elementalist Class Representative**: New Shaman enemy type demonstrating caster archetype.
+
+**Character Configuration**:
+- Create class, Idle/Walk blend space, Animation Blueprint
+- Standard animation setup parallels existing enemies
+
+**Attack Animation Setup**:
+- Create Attack Montage with Motion Warping component
+- Add `AnimNotify_MontageEvent` to send montage tag
+- Populate `TaggedMontages` array in `BP_Shaman` Blueprint
+- Add `TipSocket` to staff (projectile spawn location, same pattern as player Aura)
+
+### Spell Ability Implementation
+
+**GA_ShamanFireBolt**:
+- Inherits from `AuraProjectileSpell` (reuses fire projectile logic)
+- Customizes only relevant parameters per Shaman design
+- Inherits all projectile spawning, motion warping, ability task infrastructure
+
+**Audio Integration**: Add sound effects to spell execution for environmental feedback.
+
+**Design Simplicity**: Spell abilities require zero new code - inherited architecture handles all complexity, only parameters and audio vary per enemy type.
+
+### Behavior Tree Refinement
+
+**Dead Blackboard Key**: Prevents bugs where deceased enemies continue executing BT logic.
+- Check Dead key before ability activation in BT tasks
+- Update key in enemy death event
+
+**Dissolve Effect on Shaman**: Add visual flourish matching player Aura's dissolve behavior on death - maintains consistent VFX language across all characters.
+
+---
+
+- Enemy Finishing Touches
+  - In this chapter we will add small improvements to enemies: to begin with, a "swoosh" sound effect for the spear goblin (added as a notify track in its attack animation) and footsteps (added as a notify track in its run animation). We also used a multi template to randomize and pitch randomly the spear sound everytime.
+  - 
