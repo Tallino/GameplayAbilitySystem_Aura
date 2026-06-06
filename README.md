@@ -1781,4 +1781,4 @@ Final Fire Damage: 100 × (1 - 0.30) = 70
 ---
 
 - Enemy Spell Attacks
-  - We want a Shaman too (class will be elementalist), so we create the class, blend-space, ABP etc. 
+  - We want a Shaman too (class will be elementalist), so we create the class, blend-space, ABP etc., then the usual montage with the Motion Warping, the AM_Event to send the Attack Montage tag (in BP_Shaman also to add the tagged montage pair of the montage + that tag), and finally adding the TipSocket to the staff too.
