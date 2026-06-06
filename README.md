@@ -1781,4 +1781,5 @@ Final Fire Damage: 100 × (1 - 0.30) = 70
 ---
 
 - Enemy Spell Attacks
-  - We want a Shaman too (class will be elementalist), so we create the class, blend-space, ABP etc., then the usual montage with the Motion Warping, the AM_Event to send the Attack Montage tag (in BP_Shaman also to add the tagged montage pair of the montage + that tag), and finally adding the TipSocket to the staff too. Finally, we will make it shoot a fire bolt (so we use the same GA), also adding sounds.   
+  - We want a Shaman too (class will be elementalist), so we create the class, blend-space, ABP etc., then the usual montage with the Motion Warping, the AM_Event to send the Attack Montage tag (in BP_Shaman also to add the tagged montage pair of the montage + that tag), and finally adding the TipSocket to the staff too. Finally, we will make it shoot a fire bolt (so we use the same GA as parent, only modifying some parameters), also adding sounds.
+  - We then just finish by adding a Dead blackboard key to enemies' behaviour tree so to fix a bug + we add dissolve effect to the Shaman.
