@@ -1779,3 +1779,6 @@ Final Fire Damage: 100 × (1 - 0.30) = 70
 - **Designer-Friendly**: Animation timing controlled via notifies in animation editor, not code
 
 ---
+
+- Enemy Spell Attacks
+  - We want a Shaman too (class will be elementalist), so we create the class, blend-space, ABP etc. 
