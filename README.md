@@ -1817,17 +1817,166 @@ Final Fire Damage: 100 × (1 - 0.30) = 70
 
 ---
 
-- Enemy Finishing Touches
-  - In this chapter we will add small improvements to enemies: to begin with, a "swoosh" sound effect for the spear goblin (added as a notify track in its attack animation) and footsteps (added as a notify track in its run animation). We also used a multi template to randomize and pitch randomly the spear sound everytime.
-  - To add both hit sound/blood effects to the spear goblin, we add a UNiagaraSystem type variable to Character base (each derived will have their own effect), and the sound is added to the TaggedMontage struct. We set them in the editor, and then we trigger them in GA_MeleeAttack in case of hit.
-  - The problem now is that sound/blood effects are replicated only to the owning client so other clients can't hear/see anything. To replicate these effects, we must use Gameplay cues. So we create a BP class from gameplay cue (GC_MeleeImpact), and in the event graph e have several parameters to give to the various sound/blood spawn (that will now be triggered in the gameplay cue BP and not in the GA_MeleeAttack anymore). The trigger of the cue happens in MeleeAttack thanks to ExecuteGameplayCueWithParams, from where we can create the params and give them in input, and they will be passed through to the GC_MeleeImpact.
-  - Now in GC_MeleeImpact we want to avoid to hardcode the sound, instead we want to identify it based on the tag of the montage we pass through. Problem is if we have more tagged montages with that tag, it will just pick the first one. So we want to retrieve the correct tagged montage thanks to the separation of montage and socket tags (as for now, these "tagged montages" were actually mainly used to understand which socket to use for each attack/enemy).
-  - So old montage tags now are called socket tags, while we create 4 generic montage tags. The tagged montage struct now contains both a montage tag and a socket tag. Now in the anim events we send the (new) montage tags, while (old montage) socket tags are actually used to retrieve the locations of the sockets for spawning whatever sound effect etc. In cpp we create a function that takes a tag and returns the corresponding tagged montage struct. We call this function in the gameplay cue in order to get the tagged montage we are interested in, and from there we take the corresponding unique sound associated.
-  - For other small additions, same as in the first note of this section, we add hurt sounds in BP (in the Anim Montage of the HitReact) and death sounds in C++ (in multiDeath function implementation) to goblin spears and goblin slingshots (also footsteps for them). Then we make rock impact sound and impact effects for goblin slingshots, same for shaman (also hit react for him as it was never created), and same for the sounds of hurt/death/swipe of the Ghoul (for both left/right attack). Finally, we add particle niagara trail effects to the ghouls claw swipe (as a notify state in the left/right attack anim montages).
-  - Now we want to create the last kind of enemy, the Demon: we do all the usual stuff to create/assign BP/Anim/TailSocket etc., so MotionWarping, AN_MontageEvents and Swipe sounds. We also create a ranger (dark) version of the demon that throws rock (for this reason, we removed the hardcoded "weapon" socket name value from GA_RangedAttack, and we made it based on a socket name parameter, as for the demon without a weapon, the socket would have been the left hand). We add hurt (hit react) and death sounds, and finally we add the dissolve effect.
-  - Our idea is to make the shaman spawn these minions: so we create a SummonGameplayAbility, that gets activated by the usual Attack tag in the ranged AI BT, and it immediately calls blueprint callable function GetSpawnLocations: idea of the function is to get some random spawn locations in a fan-shaped spread in front of the shaman, tuning through editor all interested parameters such as Min/Max SpawnLocation, NumOfMinions, SpawnSpread and an array of Minion Classes from which to choose. The function simply rotates around the UpAxis of the Actor forward vector to take a starting point, then calculate DeltaSpread = SpawnSpread / Num of Minions. Then in a for loop it creates several vectors every i (step) * deltaSpread starting from the starting point and spreading out. This creates NumOfMinions arrows. Then we choose some random locations on these arrows.
-  - In the editor, we take the return values of the SpawnLocations, we shuffle them, and select them one by one randomly after some delay. In c++ we also trace a single line channel vertically and if we find a Hit, we assign the chosen spawn location to the hit point: this is to ensure that in case the shaman is not on a flat plane, the spawn point will still be on a surface. We also add a summon niagara effect on the surface right before the summoning.
-  - Now we need to select a Minion class from our TArray of sub(minion) classes: we simply take a random int between 0 and the array length and return a random index in that array. Via editor our array will simply be composed of Demon warriors and Demon rangers. We also add an extra Z value to the spawn location, so they don't spawn stuck in the ground, and then we assign them a default controller as they spawn without one by design. Finally, we add the usual (summon in this case) montage with tagged event that gets sent at the right moment before triggering the actual summon, also adding a rotation to the spawned demons to make them watch towards where the shaman is looking.
-  - Now we want to spawn specific numbers of minions: we add a MinionCount variable to AuraCharacterBase (any character could need it), and the usual interface getter function in ICombatInterface. We also add a new attack tag, the Attack.Summon tag, as we will want to differentiate between the shaman summon and the shaman attack (a fireball, as he is an elementalist). Now we need to make a BT specifically for him so to better customize how to interchange and personalize both the summon and attack abilities just for him.
-  - In the elementalist BT, we use a duplicate of the BTT_Attack (BTT_Elementalist_Attack), which differentiates by actually getting the minion count and based on that, activate the ability Summon or Attack (if minions are more than a threshold then attack, if they are less, then summon). Minion count is incremented with a CombatAbility function (implemented in AuraCharacterBase), which is called in the GA_SummonAbility whenever we spawn a minion (incremented by one).
-  - Now we want to decrement the minion count: after we spawn an actor in the SummonAbility, we bind an event to OnDestroyed for that actor: the event is the call of IncrementMinionCount with -1 as a param. Also, we add tweening (similar to interpolation): to make a nice bouncy effect when spawning, in BP_EnemyBase we call SpawnTimeline at BeginPlay time: this timeline enlarges, then diminishes, then finally stabilizes a value: the return scale track is then assigned to a vector, who is finally assigned to the RelativeScale3D of the mesh of the character.
+## Enemy Finishing Touches
+
+### Audio & Effect Polish
+
+**Animation-Synced Audio**:
+- Swoosh sound for spear goblin (notify track in attack animation)
+- Footstep sounds (notify track in run animation)
+- **Multi-template randomization**: Pitch variation per sound instance prevents repetitive audio
+
+### Hit Effects Architecture
+
+**Niagara System Integration**:
+- Add `UNiagaraSystem` variable to AuraCharacterBase
+- Each derived character defines its own blood/impact effect
+- Hit sound stored in FTaggedMontage struct
+- Configured in editor, triggered in `GA_MeleeAttack` on hit
+
+### Gameplay Cues for Replicated Effects
+
+**Problem**: Sound/blood effects only replicate to owning client - other clients see/hear nothing.
+
+**Solution**: Gameplay Cues - GAS's network-replicated cosmetic effect system.
+
+**GC_MeleeImpact** (Gameplay Cue Blueprint):
+- Event graph handles sound/blood spawning (moved from GA_MeleeAttack)
+- Accepts parameters for effect customization
+- **Automatically replicates** to all relevant clients
+
+**Triggering Cues**:
+- Call `ExecuteGameplayCueWithParams()` from MeleeAttack
+- Create and pass parameters (location, effect type, etc.)
+- Parameters forwarded to GC_MeleeImpact
+
+**Design Benefit**: Gameplay Cues are the canonical GAS solution for cosmetic effects - they handle replication, batching, and lifetime automatically.
+
+### Montage Tag vs. Socket Tag Separation
+
+**Problem**: Using one tag for both socket location AND effect lookup causes collisions when multiple montages share a tag (picks first match only).
+
+**Solution**: Decouple montage identification from socket identification.
+
+**Tag Refactor**:
+- **Old montage tags → Socket Tags**: Identify which socket to use (left wrist, weapon tip, etc.)
+- **New Montage Tags** (4 generic): Identify specific animations for effect lookup
+
+**FTaggedMontage Struct Update**:
+- `MontageTag` - For animation/effect identification
+- `SocketTag` - For spawn location resolution
+
+**Usage Split**:
+- **Animation events**: Send Montage Tags (effect triggering)
+- **Socket retrieval**: Use Socket Tags (spawn positioning)
+
+**Lookup Function**: C++ function takes tag, returns corresponding FTaggedMontage struct.
+- Called in Gameplay Cue to retrieve correct montage's unique sound
+- Resolves the "first match" ambiguity
+
+**Design Rationale**: Separation of concerns - one tag for "what animation/effect" and another for "where to spawn" enables precise effect selection even with multiple similar attacks.
+
+### Comprehensive Audio Pass
+
+**Per-Enemy Audio** (applied across all enemy types):
+- Hurt sounds in HitReact Animation Montage (Blueprint)
+- Death sounds in multi-death function (C++)
+- Footsteps for all moving enemies
+- Impact sounds/effects for projectiles (slingshot rocks, shaman bolts)
+- Missing HitReact added for Shaman
+- Ghoul-specific: hurt/death/swipe sounds for both attack directions
+- Niagara trail effects on Ghoul claw swipes (notify state in attack montages)
+
+### New Enemy: Demon
+
+**Standard Setup**: Blueprint, animations, sockets, Motion Warping, AnimNotify events, swipe sounds.
+
+**Demon Ranger Variant**: Rock-throwing dark demon
+- **Code Improvement**: Removed hardcoded "weapon" socket name from `GA_RangedAttack`
+- Now uses socket name **parameter** instead
+- **Rationale**: Weaponless demon uses left hand socket; parameterization supports both armed and unarmed ranged attackers
+- Added hurt/death sounds and dissolve effect
+
+**Design Pattern**: Each refactor toward parameterization increases reusability across enemy variants.
+
+### Summon Ability System
+
+**Concept**: Shaman summons demon minions in tactical formation.
+
+**SummonGameplayAbility**:
+- Activated by `Attack` tag in ranged AI Behavior Tree
+- Calls `GetSpawnLocations()` Blueprint callable function
+
+**GetSpawnLocations() Algorithm**:
+- **Editor Parameters**: Min/Max spawn distance, NumMinions, SpawnSpread, MinionClasses array
+- **Fan-Shaped Spread**:
+  1. Rotate around actor's Up axis from forward vector to find starting angle
+  2. Calculate `DeltaSpread = SpawnSpread / NumMinions`
+  3. Loop: Create direction vectors at `i × DeltaSpread` increments
+  4. Generates NumMinions directional vectors fanning outward
+  5. Select random points along these vectors
+
+**Ground Conformance** (C++):
+- Trace vertical line at each spawn location
+- If hit detected: Assign spawn point to hit location
+- **Purpose**: Ensures minions spawn on surfaces, not floating on uneven terrain
+- Add summon Niagara effect on surface before spawning
+
+**Spawn Sequencing** (Blueprint):
+- Shuffle spawn locations
+- Spawn minions one-by-one with delays
+- Creates dramatic staggered summoning
+
+### Minion Spawning Details
+
+**Random Class Selection**:
+- Generate random index [0, ArrayLength)
+- Return class at that index
+- **Array Composition**: Demon Warriors + Demon Rangers
+
+**Spawn Adjustments**:
+- Add Z offset to prevent ground clipping
+- Assign default AI controller (minions spawn controllerless by design)
+- Rotate spawned demons to face Shaman's look direction
+
+**Summon Animation**:
+- Standard montage with tagged event
+- Event triggers actual summon at appropriate animation moment
+
+### Minion Count Management
+
+**MinionCount Variable**: Added to AuraCharacterBase (any character may track minions).
+- Interface getter in ICombatInterface
+
+**Attack.Summon Tag**: Differentiates summon from regular attack (Shaman fireball).
+- **Rationale**: Elementalist Shaman needs both summon AND direct attack abilities
+
+**Custom Elementalist Behavior Tree**:
+- Tailored ability interchange for Shaman's dual role
+- `BTT_Elementalist_Attack` (duplicate of BTT_Attack):
+  - Reads minion count
+  - **Decision Logic**: 
+    - Minions > threshold → Direct attack (fireball)
+    - Minions < threshold → Summon more minions
+  - **Design**: Maintains minion army while contributing damage
+
+**Count Increment**:
+- `IncrementMinionCount()` in AuraCharacterBase
+- Called in `GA_SummonAbility` per spawned minion (+1)
+
+**Count Decrement**:
+- Bind event to spawned actor's `OnDestroyed`
+- Event calls `IncrementMinionCount(-1)`
+- **Result**: Accurate live minion tracking
+
+### Spawn Animation Polish
+
+**Tweening Effect** (bouncy spawn):
+- `SpawnTimeline` called at BeginPlay (BP_EnemyBase)
+- Timeline animates scale: enlarge → shrink → stabilize
+- Output scale track → vector → mesh `RelativeScale3D`
+- **Design**: Adds juice/game-feel to minion appearance
+
+**Design Philosophy**: Finishing touches transform functional systems into polished, satisfying gameplay through audio feedback, replicated effects, and animation juice.
+
+---
