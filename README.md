@@ -1980,3 +1980,6 @@ Final Fire Damage: 100 × (1 - 0.30) = 70
 **Design Philosophy**: Finishing touches transform functional systems into polished, satisfying gameplay through audio feedback, replicated effects, and animation juice.
 
 ---
+
+- Level Tweaks
+  - This section is mainly playing a bit with the map and PostProcess volumes and lights to tweak the game a bit and make it more appealing. 
