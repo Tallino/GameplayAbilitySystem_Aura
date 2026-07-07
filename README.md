@@ -1981,8 +1981,98 @@ Final Fire Damage: 100 × (1 - 0.30) = 70
 
 ---
 
-- Level Tweaks
-  - This section is mainly playing a bit with the map to tweak the game a bit and make it more appealing. First we create the map, then add a PostProcess volume and change various lighting settings. Then we compress the textures and tiles using Bulk Edit via Property Matrix functionality, to do it all in one. We also set the Dungeon as startup map, and finally we add TextureStreaming = true and Streaming.PoolSize = 1000 in the DefaultEngine.ini.
-  - We now create a BP for the flame pillar: static mesh for the pillar, niagara for the fire, point light for the light. In the event graph, we call a custom event that randomly chooses one of two timelines we created which simply makes the light flicker: that means that the output of the float track of the timeline is multiplied by a base intensity and then given to the SetIntensity() function called with the Point Light as a target.
-  - We want to fix the problem that when we go behind some geometry, the camera zooms in, and if we make the camera ignore the geometry, it won't zoom in but that means the geometry will block the view of our character. So we want the geometry to fade when this happens: we first create a material instance that has a parameter called Fade which goes into the Opacity Mask. Then we create our FadeActor that at construction time it saves the original materials in a dedicated array, then it takes each element of another array of FadeMaterialInstances (where we save our newly created material instance), and saves it a final array called DynamicMaterialInstances. Then in BeginPlay, we create FadeOut and FadeIn custom events: for FadeOut, we take each element of this array and set it as a material to the mesh of the FadeActor: for each of these materials, we look for a scalar parameter value called "Fade" and we send it to 0 thanks to a timeline. Then we call the same FadeIn that literally just calls the timeline but in reverse (in order to make it fade in again) right after a 1 second delay. Finally, when the fade is finished, we check if its at 1 or 0, and based on that, we reset the materials and block the visibility, or we set to ignore the visibility, respectively.
-  - Now what we do is actually create a BP interface (BI_FadeInterface), composed of FadeIn/FadeOut functions: we then set that FadeActor implements this interface, and therefore make these 2 functions those who trigger all that we did above. Now all we need to do is add a box component in the BP_AuraCharacter that stays in between the camera and the character: in Aura's event graph, we simply call FadeOut in OnComponentBeginOverlap for the box, if and only if, the "other actor" implements the BI_FadeInterface (symmetrically, OnEndComponentOverlap calls FadeIn). Finally, for every single piece of geometry, we must actually create a FadeActor version of it (FA_XXX). For each of these new FadeActors, we take the materials that compose their mesh and we create a material instance with the Fade parameter plugged in the opacity mask.
+## Level Tweaks
+
+### Environment Setup & Optimization
+
+**Visual Configuration**:
+- Create map, add PostProcess volume, tune lighting settings
+- **Texture Optimization**: Bulk Edit via Property Matrix - compress all textures/tiles in single operation
+- Set Dungeon as startup map
+
+**Streaming Configuration** (DefaultEngine.ini):
+- `TextureStreaming = true`
+- `Streaming.PoolSize = 1000`
+- **Purpose**: Manages texture memory for large environments
+
+**Design Benefit**: Property Matrix bulk editing dramatically reduces manual per-asset configuration time.
+
+### Flame Pillar Blueprint
+
+**Components**:
+- Static mesh (pillar)
+- Niagara system (fire effect)
+- Point light (illumination)
+
+**Flicker System**:
+- Custom event randomly selects one of two flicker timelines
+- Timeline float track output × base intensity → `SetIntensity()` on Point Light
+- **Two timelines**: Variation prevents synchronized, artificial-looking flicker across multiple pillars
+
+**Design Benefit**: Randomized timeline selection creates organic, non-repetitive lighting ambiance.
+
+### Camera Occlusion Fade System
+
+**Problem**: Camera zooms in awkwardly when geometry blocks view of character.
+
+**Naive Solutions Fail**:
+- Ignore geometry → No zoom, but geometry blocks character view
+- Keep collision → Unwanted camera zoom
+
+**Solution**: Fade occluding geometry using opacity masking.
+
+### Fade Material Setup
+
+**Material Instance**:
+- Parameter: `Fade` (scalar)
+- Connected to Opacity Mask
+- Controls transparency dynamically
+
+### FadeActor Architecture
+
+**Construction**:
+1. Save original materials in dedicated array
+2. Take fade material instances from `FadeMaterialInstances` array
+3. Create dynamic instances → store in `DynamicMaterialInstances` array
+
+**FadeOut Event**:
+1. Apply dynamic (fade) materials to mesh
+2. For each material: Find `Fade` scalar parameter
+3. Drive `Fade` to 0 via timeline (transparent)
+
+**FadeIn Event**:
+- Reverse timeline (transparent → opaque)
+- Triggered after 1-second delay
+
+**Completion Handling**:
+- Fade value at 1 (opaque) → Reset original materials, restore visibility blocking
+- Fade value at 0 (transparent) → Set to ignore visibility
+
+**Design Rationale**: Preserving/restoring original materials ensures no permanent visual changes; the fade is purely temporary occlusion handling.
+
+### Interface-Based Fade Triggering
+
+**BI_FadeInterface** (Blueprint Interface):
+- Functions: `FadeIn()`, `FadeOut()`
+- `FadeActor` implements interface
+- Interface functions trigger the fade logic
+
+**Character Detection Setup**:
+- Add box component to `BP_AuraCharacter` (positioned between camera and character)
+- **OnComponentBeginOverlap**: Call `FadeOut()` if other actor implements `BI_FadeInterface`
+- **OnComponentEndOverlap**: Call `FadeIn()` (symmetric)
+
+**Per-Geometry Setup**:
+- Create FadeActor version of each occluding mesh (`FA_XXX`)
+- Generate material instances with `Fade` parameter in opacity mask for each mesh's materials
+
+**Design Benefits**:
+- **Interface Decoupling**: Character doesn't need to know FadeActor implementation - just checks interface
+- **Scalable**: Any actor implementing interface automatically fades
+- **Clean Detection**: Box component between camera/character precisely identifies occluders
+- **Reversible**: Material restoration prevents permanent state changes
+
+**Gameplay Impact**: Player always sees their character clearly while maintaining spatial awareness of the environment - occluders fade rather than disappearing entirely.
+
+---
+
