@@ -1982,4 +1982,5 @@ Final Fire Damage: 100 × (1 - 0.30) = 70
 ---
 
 - Level Tweaks
-  - This section is mainly playing a bit with the map and PostProcess volumes and lights to tweak the game a bit and make it more appealing. 
+  - This section is mainly playing a bit with the map to tweak the game a bit and make it more appealing. First we create the map, then add a PostProcess volume and change various lighting settings. Then we compress the textures and tiles using Bulk Edit via Property Matrix functionality, to do it all in one. We also set the Dungeon as startup map and finally we add TextureStreaming = true and Streaming.PoolSize = 1000 in the DefaultEngine.ini.
+  - We now create a BP for the flame pillar: static mesh for the pillar, niagara for the fire, point light for the light. In the event graph, we call a custom event that randomly chooses one of two timelines we created which simply makes the light flicker: that means that the output of the float track of the timeline is multiplied by a base intensity and then given to the SetIntensity() function called with the Point Light as a target.  
