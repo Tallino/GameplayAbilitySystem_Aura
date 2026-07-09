@@ -2076,3 +2076,6 @@ Final Fire Damage: 100 × (1 - 0.30) = 70
 
 ---
 
+- Cost and Cooldown
+  - So we create our WBP_HealthManaWidget, where we actually will have all the real HUD: health and mana globes on the side, 6 offensive spells (1 for LMB, 1 for RMB, the other 4 for all inputs from 1 to 4), and 2 passive spells. 
+
