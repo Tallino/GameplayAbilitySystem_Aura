@@ -25,7 +25,7 @@ enum class EEffectRemovalPolicy
 	DoNotRemove
 };
 
-UCLASS()
+UCLASS(Blueprintable)
 class AURA_API AAuraAffectActor : public AActor
 {
 	GENERATED_BODY()
