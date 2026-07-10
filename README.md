@@ -2077,5 +2077,6 @@ Final Fire Damage: 100 × (1 - 0.30) = 70
 ---
 
 - Cost and Cooldown
-  - So we create our WBP_HealthManaWidget, where we actually will have all the real HUD: health and mana globes on the side, 6 offensive spells (1 for LMB, 1 for RMB, the other 4 for all inputs from 1 to 4), and 2 passive spells. 
+  - So we create our WBP_HealthManaWidget, where we actually will have all the real HUD: health and mana globes on the side, 6 offensive spells (1 for LMB, 1 for RMB, the other 4 for all inputs from 1 to 4), and 2 passive spells. Then we create a spell globe composed of the same functions of WBP_HealthGlobe, so setters for BoxSize, RingBrush, GlobePadding and SpellIconBrush (all using images from the widget designer area that have been made variables). Small mention for the background tint function which will be controlled by an input parameter that modifies (R,G,B) to make it blacker when the spell will be in cooldown.
+  - 
 
