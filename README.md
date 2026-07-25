@@ -2076,11 +2076,160 @@ Final Fire Damage: 100 × (1 - 0.30) = 70
 
 ---
 
-- Cost and Cooldown
-  - So we create our WBP_HealthManaWidget, where we actually will have all the real HUD: health and mana globes on the side, 6 offensive spells (1 for LMB, 1 for RMB, the other 4 for all inputs from 1 to 4), and 2 passive spells. Then we create a spell globe composed of the same functions of WBP_HealthGlobe, so setters for BoxSize, RingBrush, GlobePadding and SpellIconBrush (all using images from the widget designer area that have been made variables). Small mention for the background tint function which will be controlled by an input parameter that modifies (R,G,B) to make it blacker when the spell will be in cooldown. Then, we add the spell globe to the small spell boxes of the widget, and we go and remove from WBP_Overlay the old Health/Mana globe, to add the full WBP_HealthManaSpells. This means that we need to set again the widget controllers: in the event graph of HealthManaSpells, we set the controller to the 2 globes, and in the event graph oh the WBP_Overlay, we set the widget controller to the WBP_HealthManaSpells. Finally, we add an XP bar in our Overlay right below the spells.
-  - So now we want to create a DataAsset for our AbilityInfo, and we do it just like the other ones: we create a C++ class deriving from DataAsset, create a struct in it with GameplayTag (identifying the ability), an Input GameplayTag (identifying the input to trigger it), a texture2D for the icon and a material for the background. We also create an array of these structs and a lookup function to return an element/struct of the array based on the tag. Then, we add an Ability info member variable to the OverlayWidgetController class too. Small note: we decided to create our own AuraLogChannels (.h and .cpp files created directly on Rider), where we define our own logs. Then we create an ability tag for our FireBolt (in AuraGameplayTags class) and assign it in the editor as a tag for the first element of our AbilityInfo array (together with its background and icon). Regarding its input instead, we will want to set it via cpp, so we leave it read only in the editor.
-  - So now we want to figure out how to get info to the widgets about which abilities we have equipped/given to our ASC, so we need to link our ASC to our widgets, thanks to our middleman WidgetController: we create a delegate whose job is to signal when the startup abilities have been assigned at boot time. We create it in our ASC class and call broadcast on it after StartupAbilities have been given, passing in the ASC as parameter. We also create a boolean to check if startupAbilities have been give or not, for race condition reasons. In OverlayWidgetController class, we bind to the delegate right next to the other bind functions, but only if the startupAbilities haven't been called yet, otherwise we simply call the function directly. Now the broadcast trigger our OnInitializeStartupAbilities function, whose purpose is to loop over all abilities, and broadcast each of their ability info to the widgets: so we create other 2 delegates, FForEachAbility and AbilityInfoDelegate: the first one will take Ability spec as parameter and is actually passed in the ForEach function of the ASC, which actually calls the bound lambda function for each ability. The bound lambda function fills in an FAuraAbilityInfo struct thanks to newly created helper functions such as GetAbilityTagFromSpec and GetInputTagFromSpec, and then finally passes the complete ability info struct to the AbilityInfoDelegate and broadcasts this info to the widgets.
-  - Now we actually need to create functions to bind to AbilityInfoDelegate, to which the Widgets must subscribe to receive the AbilityInfo of each ability: in WBP_SpellGlobe, we bind to the AbilityInfoDelegate right after Event Widget Controller Set, and we receive the Ability Info struct: we check if that Input Tag corresponds to the one from the SpellGlobe, and in case we take the info from the struct and set icon and background based on those. Of course, we also need to set the Spell Globe Input Tags before that, and we do it in the Event Pre Construct of the WBP_HealthManaSpells: there we simply set each input tag of each Spell Globe (made variable from the Designer widget area). Finally, we set the Globe widget Controllers right after we set the Health/Mana ones. Small note for multiplayer: in AuraAbilitySystemComponent class, we override OnRep_ActivateAbilities to (re)broadcast the AbilitiesGivenDelegate in order to show the correct icon/spell also on the other clients.
-  - Now we want to implement cost and cooldown: in the GameplayAbility details panel, unreal already gives is the chance to select a Cost Gameplay Effect Class and Cooldown Gameplay Effect Class: indeed cost and cooldowns are a GE their selves. So we create a GE and assign it to GA_FireBolt, and inside of it all we do is set it a scalable float of -1 that multiplies by a Curve Table that we create (CT_Cost with Fire.FireBolt curve) that scales the cost based on the ability level. Finally, at the beginning of the Event ActivateAbility of GA_Firebolt we add CommitAbility: this function actually unites both CommitAbilityCost and CommitAbilityCooldown, which is exactly what you can imagine. Indeed, once the mana is not enough anymore, we cannot fire the spell anymore. For the cooldown, we also create a GE, give it a one-second magnitude value, and assign to the panel, but we also create a Cooldown.Fire.FireBolt tag that will be "granted" (in the panel) by the GE to the owner's ASC. That way, since the GE has a duration, until it is active it will give this tag to the owner's ASC, preventing it to fire the ability.
-  - Now we want to visualize the cooldown: we create a Cooldown Async Task cpp class (WaitCooldownChange, deriving from UBlueprintAsyncActionBase) that we will call in BP. The class will bind 2 functions at construction time, one when the gameplay tag count changes (specifically, it checks when the Cooldown Tag is removed), the other when a cooldown effect is added (so when the cooldown starts). In the callback function of the first case, we will trigger a broadcast on our newly created CooldownEnd delegate, passing in 0.f as a float. In the callback function of the second case, we will trigger a broadcast on our newly created CooldownStart delegate, passing in the TimeRemaining as a float: we get this information by calling GetActiveEffectsTimeRemaining on the ASC. Finally in BP, thanks to our inherited cpp class, we can create a node with ASC and InCooldownTag as inputs, and the 2 delegates (Cooldown Start and Cooldown End) as output execution pins. But now before implementing what to do in these 2 delegates, we need modify the AbilityInfo struct in order to have its own Cooldown tag per each ability. So we add the Cooldown tag in the AbilityInfo struct, assign it for the FireBolt in the editor, and then set in right after the MatchTagExact of the input Tag. The set cooldown Tag is then assigned to the WaitCooldownChange right after the ReceiveAbilityInfo function is finished.
-  - So now we want to show the cooldown time in the HUD: after Cooldown Start pin executes, we set the (initial) TimeRemaining, we gray out the icon, and we use Set Timer by Event function. When the event triggers, the Time Frequency given by the timer gets subtracted to the TimeRemaining and set to the TimeRemaining itself. Then the time remaining gets assigned to the cooldown text every TimerFrequency seconds. When the TimeRemaining is less than 0, we call ClearAndInvalidate on the timerHandler and set the color opacity of the icon back to default/normal.  
+## Cost and Cooldown
+
+### Spell HUD Architecture
+
+**WBP_HealthManaSpells**: Complete HUD layout
+- Health/mana globes (sides)
+- 6 offensive spell slots (LMB, RMB, keys 1-4)
+- 2 passive spell slots
+- XP bar (below spells)
+
+**Spell Globe Widget**: Mirrors HealthGlobe structure
+- Setters: BoxSize, RingBrush, GlobePadding, SpellIconBrush (all designer variables)
+- **Background Tint Function**: Input parameter modifies RGB, darkening globe during cooldown
+
+**Widget Controller Rewiring**:
+- Removed old Health/Mana globes from WBP_Overlay
+- Added full WBP_HealthManaSpells
+- Set controllers: HealthManaSpells sets globe controllers; Overlay sets HealthManaSpells controller
+
+### Ability Info Data Asset
+
+**AbilityInfo Data Asset** (same pattern as AttributeInfo):
+- C++ class deriving from `UDataAsset`
+- **FAuraAbilityInfo Struct**:
+  - `AbilityTag` - Identifies ability
+  - `InputTag` - Identifies triggering input
+  - `Icon` (Texture2D)
+  - `BackgroundMaterial`
+- Array of structs + tag-based lookup function
+- Added as member to OverlayWidgetController
+
+**AuraLogChannels**: Custom logging channels (.h/.cpp) for project-specific debug output.
+
+**FireBolt Configuration**:
+- AbilityTag defined in AuraGameplayTags
+- Icon/background assigned in editor
+- **InputTag**: Set via C++ (read-only in editor) - enables runtime remapping
+
+### Linking ASC Abilities to Widgets
+
+**Challenge**: Widgets need to know which abilities are equipped/granted to ASC.
+
+**Solution**: WidgetController mediates ASC → Widget communication via delegates.
+
+**AbilitiesGiven Delegate** (in ASC):
+- Signals when startup abilities assigned at boot
+- Broadcast after StartupAbilities granted, passes ASC
+- **Race Condition Guard**: Boolean flag tracks if abilities already given
+
+**OverlayWidgetController Binding**:
+- If abilities not yet given → Bind to delegate
+- If already given → Call function directly
+- **Why Both Paths**: Handles timing variability between controller setup and ability granting
+
+### Ability Info Broadcasting
+
+**OnInitializeStartupAbilities()**: Loops abilities, broadcasts each ability's info to widgets.
+
+**Two Supporting Delegates**:
+- **FForEachAbility**: Takes AbilitySpec, passed to ASC's ForEach function
+- **AbilityInfoDelegate**: Broadcasts complete ability info to widgets
+
+**Broadcasting Flow**:
+1. ASC's ForEach calls bound lambda per ability
+2. Lambda fills FAuraAbilityInfo struct using helpers:
+   - `GetAbilityTagFromSpec()`
+   - `GetInputTagFromSpec()`
+3. Completed struct broadcast via AbilityInfoDelegate
+
+**Helper Functions Rationale**: Extract tags from specs cleanly, encapsulating spec-parsing logic.
+
+### Widget Subscription
+
+**WBP_SpellGlobe Binding**:
+- Bind to AbilityInfoDelegate after "Event Widget Controller Set"
+- Receive AbilityInfo struct
+- **Filter**: Check if struct's InputTag matches this globe's InputTag
+- On match: Set icon and background from struct
+
+**Input Tag Assignment** (in WBP_HealthManaSpells PreConstruct):
+- Set each SpellGlobe's InputTag (designer variables)
+- Must occur before ability info broadcasts
+
+**Multiplayer Fix** (AuraAbilitySystemComponent):
+- Override `OnRep_ActivateAbilities()`
+- Re-broadcast AbilitiesGivenDelegate
+- **Purpose**: Ensures correct spell icons appear on all clients
+
+### Cost & Cooldown as Gameplay Effects
+
+**Key Insight**: Cost and cooldown are themselves Gameplay Effects.
+
+**GA Details Panel**: Unreal provides Cost GE Class and Cooldown GE Class slots.
+
+**Cost GE**:
+- Scalable float of -1 × Curve Table (`CT_Cost` with Fire.FireBolt curve)
+- Scales mana cost by ability level
+- **Negative value**: Subtracts from mana attribute
+
+**CommitAbility()**:
+- Called at start of ActivateAbility
+- Unites `CommitAbilityCost()` + `CommitAbilityCooldown()`
+- **Effect**: Insufficient mana prevents ability activation
+
+**Cooldown GE**:
+- One-second magnitude
+- Grants `Cooldown.Fire.FireBolt` tag to owner's ASC
+- **Mechanism**: Duration-based GE grants tag while active
+- Tag presence blocks re-activation until expiry
+
+**Design Elegance**: Reusing GE system for cost/cooldown means no separate systems - leverages existing tag blocking, replication, and duration handling.
+
+### Cooldown Visualization
+
+**WaitCooldownChange Async Task**:
+- C++ class deriving from `UBlueprintAsyncActionBase`
+- Callable from Blueprint as node with execution pins
+
+**Two Bindings** (at construction):
+1. **Tag Count Change**: Detects Cooldown Tag removal (cooldown ends)
+   - Callback: Broadcast CooldownEnd delegate (0.f)
+2. **Cooldown Effect Added**: Detects cooldown start
+   - Callback: Broadcast CooldownStart delegate (TimeRemaining)
+   - TimeRemaining from `GetActiveEffectsTimeRemaining()`
+
+**Blueprint Node**: Inputs (ASC, InCooldownTag), Outputs (CooldownStart, CooldownEnd execution pins).
+
+**AbilityInfo Struct Extension**:
+- Add per-ability CooldownTag
+- Assign FireBolt's cooldown tag in editor
+- Set after InputTag MatchTagExact
+- Pass to WaitCooldownChange after ReceiveAbilityInfo
+
+### Cooldown HUD Display
+
+**On CooldownStart**:
+1. Set initial TimeRemaining
+2. Gray out ability icon
+3. Start recurring timer via `SetTimerByEvent`
+
+**Timer Loop**:
+- Each tick: Subtract TimerFrequency from TimeRemaining
+- Display TimeRemaining as cooldown text
+- Update every TimerFrequency seconds
+
+**On Completion** (TimeRemaining < 0):
+- Call `ClearAndInvalidate` on timer handle
+- Restore icon opacity to normal
+
+**Design Benefits**:
+- **Async Pattern**: Non-blocking cooldown monitoring via async task
+- **Data-Driven**: Per-ability cooldown tags enable independent cooldown tracking
+- **Visual Feedback**: Grayed icon + countdown text clearly communicate ability availability
+- **Reusable**: Same WaitCooldownChange node works for all abilities
+
+---
+
