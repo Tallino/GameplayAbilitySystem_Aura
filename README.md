@@ -2233,3 +2233,6 @@ Final Fire Damage: 100 × (1 - 0.30) = 70
 
 ---
 
+- Experience and Leveling Up
+  - So we now want to implement experience, leveling up, and all that concerns this area. But sticking to an exponential mathematical formula to determine the needed XP for the next level is not the best: first of all, we want to be able to set them by hand. Secondly, we would like other values associated to our level up information (not just the XP requirement). So our design decision will be data-driven (as usual), so to create a Data Asset that per each level can keep track of different int32 such as Level Up Requirement, Attribute Point Reward and Spell Point reward. Also, we will want some kind of lookup function FindLevelForXp, so we can skip immediately to a level based on the XP our character just reached. This will help in cases such as double/triple leveling (in case per example we kill a higher level enemy that rewards us with a lot of XP).
+  - 
