@@ -22,6 +22,8 @@ AAuraCharacter::AAuraCharacter()
 	bUseControllerRotationPitch = false;
 	bUseControllerRotationRoll = false;
 	bUseControllerRotationYaw = false;
+	
+	CharacterClass = ECharacterClass::Elementalist;
 }
 
 // Called right after replication of PlayerState (note: our ACS is on the PlayerState)
