@@ -2233,13 +2233,153 @@ Final Fire Damage: 100 × (1 - 0.30) = 70
 
 ---
 
-- Experience and Leveling Up
-  - So we now want to implement experience, leveling up, and all that concerns this area. But sticking to an exponential mathematical formula to determine the needed XP for the next level is not the best: first of all, we want to be able to set them by hand. Secondly, we would like other values associated to our level up information (not just the XP requirement). So our design decision will be data-driven (as usual), so to create a Data Asset that per each level can keep track of different int32 such as Level Up Requirement, Attribute Point Reward and Spell Point reward. Also, we will want some kind of lookup function FindLevelForXp, so we can skip immediately to a level based on the XP our character just reached. This will help in cases such as double/triple leveling (in case per example we kill a higher level enemy that rewards us with a lot of XP).
-  - So we create our LevelUpInfo class, with the above-mentioned struct, and the FindLevelForXP function which takes an XP int32 and essentially iterates through our array of LevelUpInfo structs and stops when it encounters an index where the LevelUpRequirement is bigger than the XP (note that indexes correspond to Level, so index 0 is just a placeholder, but LevelUpInformation[1] = Level 1 Information, LevelUpInformation[2] = Level 2 Information and so on). If the XP is bigger than the required one, then we increase ++Level (our index) and go to the next element of the struct. Also, we early return the level in case = if (LevelUpInformation.Num() <= Level) return Level (please explain correctly). Then in the editor, we manually add 10 elements (levels) to the array, manually setting the level up requirements as we wish, and setting to level 5 a special and exceptional +2 attribute +2 spell points awards (default for other levels is 1).
-  - So we create the XP member variable in the PlayerState, giving it setters, getters, addTo functions, and a delegate to broadcast it whenever it changes (so in both the setters and AddTo, and in the On_Rep too). We do the same for the Level (which already existed but missed some of these functions + the delegate). Then in OverlayWidgetController we create the function that will bind to the delegate and triggered by the broadcast: when the XP changes, the function in the Widget Controller will first find the level based on the lookup function we made, giving the XP in input. Then we look for the LevelUpRequirement (so the XP requirement to get to the next level) and the PreviousLevelUpRequirement (so the XP requirement to get to the level we are at right now). We take the delta between these 2 (so actually the interval between the level we are at and the next one). Then we take the XPForThisLevel (the NewXP minus the PreviousLevelUpRequirement, so the level-specific XP we are now), and we divide it by the Delta to find the XPBarPercent. Finally, we broadcast this XPBarPercent using another delegate.
-  - Now we need plan for awarding XP: when an enemy receives damage, it's attribute set will know when the damage is fatal and send a gameplay event with the XP reward value to the attacker. In order for the attacker to receive gameplay events, we will use a passive GA_ListenForEvents that we self-assign at the beginning and never deactivate, and will help him receive the XP. This will also be done through a GE spec that carries along the XP reward and applies to the ASC, and since XP is not an attribute, we will consider the Incoming XP as a meta attribute. This indeed will be sent to the attacker's player state, who then broadcasts it to widget controllers, who finally updates the level/XP bar. So in the end attribute set will be responsible for both sending the gameplay event with the XP to the attacker's player state which will need to update, and then handle the incoming XP.
-  - So we want a specific XPReward for each character class, so we create a curve table with 3 different curves (one per each chracter class). In the FCharacterClassDefaultInfo struct in the CharacterClassInfo class, we add a scalable float that we then assign in the editor to each curve. Finally, in AuraAbilitySystemLibrary, we create a getter function that returns the XP Reward based on character class and level: all it does is take the CharacterClassInfo from the game mode, get the default info based on class, and GetValueAtLevel with Level in input called on the struct's scalable float.
-  - So now we create our IncomingXP meta attribute (of type FGameplayAttributeData) in AuraAttributeSet class: just like for the IncomingDamage, in PostGameplayEffectExecute we check if the attribute in question is the IncomingXP, and in case it is, we get it and store it. Then we create the ListenForEvent GA and add it to a new array of StartupPassiveAbilities that we create on the Character (ASC is in charge of looping through the array and activate the ability once at the beginning). This GA fundamentally waits for gameplay events with Attribute tag: when it receives one, it checks if it is a GE_EventBasedEffect we created and in case it is, it creates an outgoing spec with the magnitude set by the caller. This GE spec only contains the IncomingXP meta attribute as a modifier, which takes it from the caller, and finally it self applies it. Now we only need to send the event from the enemy's perspective.
-  - In AuraAttributeSet PostGameplayEffectExecute, right after the fatal damage check, we send the XP Event by getting target level and class, lookup function that returns the XP Reward, setting it in the Payload and then sending the payload in SendGameplayEventToActor. Finally, we decide to create a PlayerInterface that will be in charge of actually calling the AddToXP on the PlayerState (actually derived AuraCharacter will do it), so remove the circular dependancy between AttributeSet and PlayerState. It will be the AttributeSet to call the PlayerInterface addToXp, passing in the IncomingXP meta attribute. When the XPChanged delegate triggers on the OverlayWidgetController, the controller calculates the percent (OnXPChanged function we explained before), triggers another delegate (OnXPPercentChangedDelegate), to which the XP Bar widget subscribed in BP, which in turn finally takes the percent and sets it as its own progress bar percent in the HUD.
-  - We prepare for leveling up by adding LevelUp() function in the newly created PlayerInterface. In the meantime, we enrich the PlayerInterface class with several Getters/Adders to PlayerLevel, XP, AttributePoints, SpellPoints etc... AuraCharacter concrete class will actually implement these, simply returning (or adding) the information from/to its PlayerState and the LevelUpInfo contained in it. Finally, we call these functions in AttributeSet in case we Level Up (level up check is based on FindLevelForXP lookup function). Indeed, we didn't want AttributeSet to directly depend on PlayerState to avoid circular dependency.
-  - Now we want to respond/show the level in the HUD: so first of all, in OverlayWidgetController we bind to OnLevelChangedDelegate (from PlayerState), and broadcast OnPlayerLevelChangedDelegate (from the Overlay itself). Indeed, it the editor in blueprint, we create a new WBP_ValueGlobe which will bind to this last delegate, and in turn, sets its own text value to the new level. Then all we did was adding the globe and a background Aura frame to the overlay, set the widget controller, and some final aesthetic tweaks. Then we add a Niagara system for the level up, making it spawn/activate at level up time. To make it face it the camera, we decided to make camera and spring arm as C++ variables and not anymore as added in the editor. Finally, we create a MessageWidget that the Overlay will spawn to show the a level up message: this happens by binding to the Level up delegate, creating the Message and adding it to the viewport (also setting the level text variable to the new level broadcasted by the delegate). Also we added sound and small animation to the text.
+## Experience and Leveling Up
+
+### Data-Driven Level Design
+
+**Why Not a Formula**: Exponential XP formulas are inflexible.
+- Can't hand-tune individual level requirements
+- Can't associate additional per-level rewards (attribute/spell points)
+
+**LevelUpInfo Data Asset**:
+- Per-level struct with: `LevelUpRequirement`, `AttributePointReward`, `SpellPointReward` (int32)
+- `FindLevelForXP()` lookup function
+
+### FindLevelForXP Lookup Logic
+
+**Purpose**: Determine current level from total XP, supporting multi-level jumps (e.g., killing high-level enemy grants massive XP).
+
+**Algorithm**:
+- Iterate through LevelUpInfo array
+- **Index = Level**: Index 0 is placeholder, `LevelUpInformation[1]` = Level 1, etc.
+- Stop when a level's requirement exceeds current XP
+- If XP exceeds requirement: `++Level`, continue
+
+**Boundary Guard**:
+```cpp
+if (LevelUpInformation.Num() <= Level) return Level;
+```
+- **Purpose**: Prevents array out-of-bounds access when player reaches max defined level
+- Without this check, iterating past the last array element would cause a crash
+- Returns the capped max level gracefully
+
+**Editor Configuration**: 10 levels manually configured
+- Custom requirements per level
+- Level 5 special reward: +2 attribute/+2 spell points (default is 1)
+
+### XP & Level State Management
+
+**PlayerState Additions**:
+- XP member variable with getters, setters, `AddToXP()`
+- Delegate broadcasts on change (setters, AddTo, OnRep)
+- Level enriched with same functions + delegate
+
+**OverlayWidgetController XP Handling**:
+- Bind to XP change delegate
+- On change:
+  1. Find level via `FindLevelForXP(NewXP)`
+  2. Get `LevelUpRequirement` (next level threshold)
+  3. Get `PreviousLevelUpRequirement` (current level threshold)
+  4. Calculate `Delta` (XP span for current level)
+  5. Calculate `XPForThisLevel` = NewXP - PreviousLevelUpRequirement
+  6. `XPBarPercent` = XPForThisLevel / Delta
+- Broadcast percent to XP bar widget
+
+### XP Reward Architecture
+
+**Award Flow Concept**:
+- Enemy AttributeSet detects fatal damage
+- Sends Gameplay Event with XP reward to attacker
+- Attacker receives via passive `GA_ListenForEvents` (self-assigned, never deactivated)
+- XP delivered via GE spec (XP treated as meta attribute since not a true attribute)
+- Routes to attacker's PlayerState → WidgetController → XP bar update
+
+**Why Passive Ability**: A permanently active ability provides a clean listener for incoming gameplay events without polling.
+
+### Class-Specific XP Rewards
+
+**XPReward Curve Table**: Three curves (one per character class).
+
+**Integration**:
+- Add scalable float to `FCharacterClassDefaultInfo`
+- Assign curves in editor per class
+- `AuraAbilitySystemLibrary` getter: Returns XP reward by class + level
+  - Fetches CharacterClassInfo from GameMode
+  - Gets default info by class
+  - Calls `GetValueAtLevel()` on scalable float
+
+**Design Benefit**: Higher-tier enemies reward more XP, tunable per class without code.
+
+### IncomingXP Meta Attribute
+
+**Setup** (AuraAttributeSet):
+- `IncomingXP` of type `FGameplayAttributeData` (meta attribute like IncomingDamage)
+- In `PostGameplayEffectExecute`: Check if attribute is IncomingXP, store if so
+
+**GA_ListenForEvents Passive Ability**:
+- Added to new `StartupPassiveAbilities` array on Character
+- ASC loops array, activates once at startup
+- **Behavior**:
+  1. Waits for Gameplay Events with Attribute tag
+  2. On event: Verifies it's the `GE_EventBasedEffect`
+  3. Creates outgoing spec with SetByCaller magnitude
+  4. Spec contains IncomingXP modifier (from caller)
+  5. Self-applies spec
+
+### XP Event Dispatch
+
+**Sending XP** (AuraAttributeSet PostGameplayEffectExecute):
+- After fatal damage check:
+  1. Get target level and class
+  2. Lookup XP reward
+  3. Set in payload
+  4. `SendGameplayEventToActor()` to attacker
+
+### Circular Dependency Resolution
+
+**Problem**: AttributeSet needs to update PlayerState XP, but direct dependency creates circular reference.
+
+**Solution**: PlayerInterface abstraction.
+
+**IPlayerInterface**:
+- `AddToXP()`, `LevelUp()`, and getters/adders for PlayerLevel, XP, AttributePoints, SpellPoints
+- `AuraCharacter` implements, delegating to PlayerState and its LevelUpInfo
+- **AttributeSet calls interface**, not PlayerState directly
+
+**Design Rationale**: Interface breaks circular dependency while maintaining clean data flow. AttributeSet depends on abstraction, not concrete PlayerState.
+
+### Level Up Detection
+
+**Trigger**: In AttributeSet, after XP processing
+- Use `FindLevelForXP` to check if new XP crosses level threshold
+- If level increased: Call interface `LevelUp()` and reward functions
+
+### XP Bar UI Update
+
+**Delegate Chain**:
+1. XPChanged delegate triggers on OverlayWidgetController
+2. Controller calculates percent (OnXPChanged)
+3. Triggers OnXPPercentChangedDelegate
+4. XP Bar widget (subscribed in BP) sets progress bar percent
+
+### Level Display & Celebration
+
+**Level Number Display**:
+- OverlayWidgetController binds to OnLevelChangedDelegate (PlayerState)
+- Broadcasts OnPlayerLevelChangedDelegate (Overlay)
+- WBP_ValueGlobe binds, sets text to new level
+- Add globe + Aura frame background to overlay
+
+**Level Up VFX**:
+- Niagara system spawns/activates on level up
+- **Camera-Facing Fix**: Camera and spring arm converted to C++ variables (from editor)
+  - **Why C++**: Enables programmatic access to orient VFX toward camera
+
+**Level Up Message**:
+- MessageWidget spawned by Overlay on level up delegate
+- Displays level-up notification with new level text
+- Added to viewport with sound and text animation
+
+**Design Philosophy**: Leveling combines data-driven progression (LevelUpInfo), GAS event routing (passive ability + meta attributes), and celebratory feedback (VFX, message, sound) for satisfying player progression.
+
+---
