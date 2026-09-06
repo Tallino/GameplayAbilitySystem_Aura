@@ -2383,3 +2383,6 @@ if (LevelUpInformation.Num() <= Level) return Level;
 **Design Philosophy**: Leveling combines data-driven progression (LevelUpInfo), GAS event routing (passive ability + meta attributes), and celebratory feedback (VFX, message, sound) for satisfying player progression.
 
 ---
+
+- Attribute Points
+  - So we now add Attribute/Spell points in the PlayerState, we all the usual accessor things, broadcasting the new value whenever we add/set them, or when we replicate them. AttributeMenuWidgetController will be in charge of binding to those delegates from the PlayerState, and broadcast another delegate with the new value that we will listen for in the blueprint widget.
