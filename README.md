@@ -2385,4 +2385,4 @@ if (LevelUpInformation.Num() <= Level) return Level;
 ---
 
 - Attribute Points
-  - So we now add Attribute/Spell points in the PlayerState, we all the usual accessor things, broadcasting the new value whenever we add/set them, or when we replicate them. AttributeMenuWidgetController will be in charge of binding to those delegates from the PlayerState, and broadcast another delegate with the new value that we will listen for in the blueprint widget.
+  - So we now add Attribute/Spell points in the PlayerState, we all the usual accessor things, broadcasting the new value whenever we add/set them, or when we replicate them. AttributeMenuWidgetController will be in charge of binding to those delegates from the PlayerState, and broadcast another delegate with the new value that we will listen for in the blueprint widget. The widget will be a special kind of row that listens for it and changes the number in the row. Also dont forget setting the widget controller before all this (the binding comes after the event widgetControllerSet is triggered).
