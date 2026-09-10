@@ -2384,8 +2384,69 @@ if (LevelUpInformation.Num() <= Level) return Level;
 
 ---
 
-- Attribute Points
-  - So we now add Attribute/Spell points in the PlayerState, we all the usual accessor things, broadcasting the new value whenever we add/set them, or when we replicate them. AttributeMenuWidgetController will be in charge of binding to those delegates from the PlayerState, and broadcast another delegate with the new value that we will listen for in the blueprint widget. The widget will be a special kind of row that listens for it and changes the number in the row. Also, don't forget setting the widget controller before all this (the binding comes after the event widgetControllerSet is triggered).
-  - Now we want to implement the Attribute Upgrade Buttons: we make a function directly on the WBP_TextValueButtonRow that can access its own Upgrade Button and enable/disable it based on a boolean. From the AttributeMenu graph, we respond to the bound delegate triggered when the attribute changes by calling the enable/disable function on the TextValueButtonRow based on the broadcast attribute value (if its > 0, then we enable, otherwise we disable). 
-  - Then, we want to make these buttons actually upgrade the attributes when clicked: for that, we make a function on our overlay widget controller, specifically our attribute menu widget controller, whenever we click one of those buttons (so a blueprint callable function). We will use the attribute gameplay tag that each row has in order to send the info on which attribute to upgrade. So from BP, we bind OnClicked on the button of the WBP_TextValueButton, to trigger the UpgradeAttribute function in the widget controller. In turn, it calls the same named function in the ASC, which from a (as usual) PlayerInterface getter function that is implemented in AuraCharacter, it checks for positive attribute points, and in case it calls ServerUpgradeAttribute (server RPC version), which finally builds a payload with the AttributeTag (EventMagnitude equal to 1), send it with SendGameplayEventToActor, and finally decreases the attributePoints on the character by one. As for with XP, our passive listener ability will receive the gameplay event and self-apply the GE_EventBasedEffect based on the attribute tag: if the attribute tag name corresponds to one of our primary attributes, it sets it by caller (which is the magnitude of 1 sent in the payload).
-  - Then we solve 2 small bugs: when we level up, we are not getting our max health/mana replenished due to race condition between the MMC and the PostGameplayEffectExecute. Therefore, we override PostAttributeChange in AttributeSet and set the new health/mana there (only when we level up, using a boolean to check). Then to remove some errors due to the non-related attributes when we level up (so the primary ones), since only incomingXP is concerned, we modified the GA_ListenToEvent to loop in an array of pre-defined attributes (our 4 primary ones + IncomingXP), and for the corresponding one (compare with EventTag) we do the usual stuff, but for the other non-related ones, we do the same thing but assigning a set by caller magnitude of 0. Final polish before end of section: we add sounds to our buttons (adding PlaySound2D after OnClicked/OnHovered events in the Button widgets).
+## Attribute Points
+
+### Point State Management
+
+**PlayerState Additions**: Attribute Points and Spell Points
+- Standard accessors (get/set/add)
+- Delegates broadcast on change/replication
+
+**Display Flow**:
+- AttributeMenuWidgetController binds to PlayerState point delegates
+- Broadcasts new value via own delegate
+- Special row widget listens, updates displayed number
+- **Timing**: Binding occurs after "Event Widget Controller Set"
+
+### Attribute Upgrade Buttons
+
+**Button Enable/Disable**:
+- Function on WBP_TextValueButtonRow controls its Upgrade Button state
+- **Logic**: Attribute points > 0 → enable; else disable
+- Triggered by attribute point change delegate
+
+**Design Rationale**: Prevents spending non-existent points, giving clear visual availability feedback.
+
+### Attribute Upgrade Execution
+
+**Click Handler Flow**:
+1. Blueprint binds button `OnClicked` → `UpgradeAttribute()` (widget controller)
+2. Uses row's AttributeTag to identify which attribute to upgrade
+3. Controller calls same-named ASC function
+4. ASC checks positive attribute points via PlayerInterface getter (implemented in AuraCharacter)
+5. If points available: Call `ServerUpgradeAttribute()` (Server RPC)
+6. Server builds payload: AttributeTag with EventMagnitude = 1
+7. `SendGameplayEventToActor()` dispatches
+8. Decrease attribute points by 1
+
+**Passive Listener Integration**:
+- `GA_ListenForEvents` receives gameplay event (same as XP flow)
+- Self-applies `GE_EventBasedEffect` based on attribute tag
+- If tag matches a primary attribute: Set by caller (magnitude 1)
+
+**Design Consistency**: Reuses the XP passive-listener architecture - same event-routing pattern handles both XP and attribute upgrades.
+
+### Bug Fixes
+
+**Level-Up Health/Mana Replenishment**:
+- **Problem**: Max Health/Mana not replenished on level up due to race condition between MMC and PostGameplayEffectExecute
+- **Solution**: Override `PostAttributeChange` in AttributeSet
+  - Set new Health/Mana here
+  - Guard with boolean (only on level up)
+- **Why This Works**: PostAttributeChange fires after Max values recalculate, ensuring current values fill to new maximums
+
+**Unrelated Attribute Errors**:
+- **Problem**: Level-up events trigger errors for non-XP attributes (primary attributes)
+- **Solution**: Modify `GA_ListenForEvents` to loop through predefined attribute array (4 primaries + IncomingXP)
+  - Matching attribute (compare EventTag): Normal processing
+  - Non-matching attributes: Same process but SetByCaller magnitude = 0
+- **Rationale**: Ensures all attributes are handled gracefully, preventing errors from unhandled event types
+
+### Final Polish
+
+**Button Audio**: `PlaySound2D` after OnClicked/OnHovered events in Button widgets for tactile feedback.
+
+**Design Philosophy**: Attribute point spending reuses established GAS event patterns while adding careful bug fixes for edge cases (level-up timing, event handling) - demonstrating how robust systems require handling race conditions and unhandled cases.
+
+---
+
