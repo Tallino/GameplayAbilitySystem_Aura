@@ -2452,5 +2452,5 @@ if (LevelUpInformation.Num() <= Level) return Level;
 
 - Spell Menu
   - So we will now create a Spell menu where we can use Spell points to activate (and then eventually assign) both Offensive Abilities and Passive Abilities, which would otherwise would be locked. Once an ability is activated, spell points may still be used on that ability to increase its level/power (upgrade the ability). The menu will also feature a small overlay replica below to see the equipped abilities, and then a description text box on the side. 
-  - So first we create a Spell Globe Button, duplicating it from the one for the level and copying most of its features, then we create the offensive spell tree with a matrix of these newly created globes (assigning also different rings to hovered/press etc.). Then we do the smaller 3-button passive spell row, 
+  - So first we create a Spell Globe Button, duplicating it from the one for the level and copying most of its features, then we create the offensive spell tree with a matrix of these newly created globes (assigning also different rings to hovered/press etc.). Then we do the smaller 3-button passive spell row and the equipped spell row menu. 
   - 
