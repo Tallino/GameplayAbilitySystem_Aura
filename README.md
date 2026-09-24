@@ -2450,22 +2450,229 @@ if (LevelUpInformation.Num() <= Level) return Level;
 
 ---
 
-- Spell Menu
-  - So we will now create a Spell menu where we can use Spell points to activate (and then eventually assign) both Offensive Abilities and Passive Abilities, which would otherwise would be locked. Once an ability is activated, spell points may still be used on that ability to increase its level/power (upgrade the ability). The menu will also feature a small overlay replica below to see the equipped abilities, and then a description text box on the side. 
-  - So first we create a Spell Globe Button, duplicating it from the one for the level and copying most of its features, then we create the offensive spell tree with a matrix of these newly created globes (assigning also different rings to hovered/press etc.). Then we do the smaller 3-button passive spell row and the equipped spell row menu, and then add all of this to a Spell Menu Widget (which took most of its design base from the Attribute Menu). Finally, we add the 2 ability description boxes (with scroll boxes) to the side.
-  - Then we make the SpellMenu "addable" from the Overlay with a Spell Menu Button. We add the usual callback delegates to signal when we open the menu (in that case, we disable control with Set Input Mode UI Only), and we close the menu. Tricky thing was to calculate the viewport alignment since the spell menu is on the right. As of now, it is still highly dependent on custom screen resolution and therefore not perfectly aligned yet.
-  - Now we want to make it functional: we create SpellMenuWidgetController cpp class and our objective is to send the abilities to the "equipped abilities" row in the menu: to do that, we can re-use the same algorithm as OnInitializeStartupAbilities in OverlayWidgetController, that is, bind a callback to a delegate, that is passed as a parameter to a ForEach function in the ASC. For each ability, the delegate triggers that callback that fundamentally broadcasts ability info to the widgets. Since we want to reuse it, we will move it to AuraWidgetController base class. Then we move all the fundamental member variables (AttributeSet, PlayerState, PlayerController and ASC) to the base class, creating also the derived version of them, and casting them in some getters in the same base class that we can reuse the variables in the derived classes to get Aura PlayerController, AuraPlayerState etc. without the need to recast everytime.
-  - Now we need to construct the SpellMenuWidget, in the AuraHUD class (our widget controllers live on the HUD). As always, the HUD constructs the widget controller (that we assign via editor), calls bindCallbackToFunctions and returns. It will actually be a getter on the AbilitySystemBluePrintLibrary that will get it from the HUD, and this is the getter we will call in BP in the WBP_SpellMenu graph, where he will self-set its own widget controller. We create a separate Spell Button Globe for the equipped ones since they will be slightly different from the Offensive abilities ones, and for each we assign their input tag variable (including the passive ones, for which we had to add their relative gameplay tag in cpp in AuraGameplayTags). Then we set the various widget controllers, from parent (SpellMenuWidget) to the children (EquippedSpellRow, who in turn sets them for its children globes). Finally, SpellMenu will eventually (after setting the controllers) call BroadcastInitialValues, to which the globes will subscribe: when they receive the broadcast ability info, they will check the input tag, and if it corresponds, it will set brush/icon/background to the corresponding globe. This way, the spells in the overlay are always showing correctly in the "equipped abilities" area of the spell menu.
-  - Now we need the concept of an Ability Status, which can be one of several states that tell us what we can and cannot do with an ability. Specifically we want 4 main options for Ability Status: Locked (not yet unlockable), Eligible (we can spend at least 1 spell point on it), Unlocked (we spent the spell point, and we can equip it), Equipped (we equipped it, will still show the icon just like Unlocked, but it also will appear down below in the equipped abilities). We will therefore need 4 gameplay tags for these statuses. Then we will want also Abilities Type (with relative tags): Offensive, Passive, None. So we add these tags in our usual class, and also in AuraAbilitySystemComponent, inside the call of AddCharacterAbilities, we dynamically add to the spec the Equipped tag before GiveAbility(). Finally, we create a handy GetStatusFromSpec() function that does exactly what you think. Remember abilities should have only one status tag at a time, so once we set the statuses, we will be sure to handle removing the old status tag before adding the new one.
-  - Now we want to show the abilities in the Offensive Abilities tree: so we add a gameplay tag variable in the WBP_SpellGlobe_Button, then we cascade the usual SetWidgetController to the subwidgets of each widget, and then the subwidget start their logic after the even Widget Controller Set: in the case of the buttons, they bind to the usual AbilityInfo delegate, they receive the ability info, and after checking the correspondence with its own tag, it branches/switches on the several status case, setting icon/background based on the various statuses. Of course, to do this, we had to add the Status Tag to the Ability Info struct and transmit it into BroadcastAbilityInfo(), using the above created GetStatusFromSpec() to get the status based on the ability spec.
-  - Now when we level up we want to see which abilities we can unlock (so the ones whose level requirement corresponds to the level we are at): so in the AbilityInfo struct will now have the level requirement and a TSubClassOf so the ASC can know which class of ability to add when we will add new ones (since for now, we only have those added in StartupAbilities), then we add a new tag for Electrocute spell (which for now will simply act as a placeholder). The ability info will live on the GameModeBase and will be retrievable via a getter in the AuraAbilitySystemLibrary. Finally, we add via editor in the ability info the new element for the Electrocute, and we give the newly created Electrocute tag to one the globes in the Offensive Spell tree.
-  - Now we want the globe to be become active and selectable when we level up (so, its status must be set to Eligible): we create a function on the ASC that can loop in the AbilityInfo and if we meet the level requirements for any of them, update their status. We first check if we already activated each ability during the loop with a new GetSpecFromAbilityTag function and if its nullptr (no spec with tag exists in ActivatableAbilities struct), then we can actually continue (same for LevelUpRequirement check). If everything is fine, we create a spec, give it an Eligible status tag, and finally give it with GiveAbility.
-  - Now we need a delegate that broadcasts when an ability status change, and our widget can subscribe to it in order to update the spell tree: so we create a delegate on the ASC which takes AbilityTag and StatusTag, and this delegate will be broadcast by a client RPC (ClientUpdateAbilityStatus). This RPC will finally be called right after the GiveAbility in UpdateAbilityStatuses, and UpdateAbilityStatuses will be finally called when we level up (so AddToPlayerLevel in AuraCharacter). Finally, from SpellMenuWidgetController we bind to the delegate, retrieving the AbilityInfo thanks to the Ability Tag (and assigning its StatusTag), and from BP, the SpellMenuController will bind to this delegate and assign the received spell point value as text to the FramedValue variable in the menu.
-  - Now we want to create a function for when we select an icon, and make a small animation + sound too (also deselect all other globes in the offensive spell tree when selecting one): in OffensiveSpellTree, we take all globes and make them bind to listen to an EventDispatcher. This event dispatcher will be called from the OnClicked event of WBP_SpellGlobe_Button, and it will bring along as a param the selected globe so that we can decide what to keep selected and deselect all the others. Indeed, select and deselect are called from OffensiveSpellTree right after the trigger of the event, and they are implemented respectively as to play an animation/a sound, while deselect simply sets the render opacity to 0. We do the same reasoning to the PassiveSpell tree. To make all passive deselect when an offensive is chosen and vice-versa, we simply call (from parent, so SpellMenu) a DeselectAll on the offensiveSpellTree when the Passive event dispatcher has been received, and vice-versa.  
-  - Now we want our spell menu to be actually functional: by default, spell point and equip buttons must be disabled. Selecting an equipped spell globe, both buttons must be enabled. Selecting a locked spell globe, both of then must be disabled. Selecting an eligible spell globe (after leveling up), spend point button must be enabled but equip button must be disabled. Selecting an unlocked spell globe, both must be enabled. Of course, for spell points button, the spell points also must be > 0. So we create a delegate that will broadcast the 2 booleans (SpellButtonEnabled and EquipButtonEnabled) to the widget. Then we create a function that takes 2 booleans, an ability tag and the spell points, and sets them based on their conditions as said before. This function is called in another function called SpellGlobeSelected which is triggered via BP after the OnClicked event of the globe. This transmits info on which ability (tag) was clicked, and from the tag we get the spec and then the status, and with this info we can finally infer the booleans and broadcast them. Also, we create a "nullptr" version of a gameplay tag, which is Ability_None. Finally, to cover a corner case where if we level up with menu open it doesn't update, we call the booleans check again in the lambdas of SpellPointsChanged and AbilityStatusChanged (in BindCallbackTODependencies), storing the 2 tags in a private local struct in the class, that ensures the race condition between the broadcasts don't bring to this corner case.
-  - Now we want to have the ability to spend our spell points: in BP we bind to spend point button OnClicked event SpendPointButtonPressed function on the SpellMenuWidgetController, which in turns calls server version on the ASC. What the server version does is: subtract 1 from SpellPoint, check the status and if its Eligible, it removes Eligible/adds Unlocked from the tags and sets Status to unlocked. If instead its status Equipped/Unlocked, it means we are upgrading the ability level, so we add 1 to it. Finally, we call the already created ClientUpdateAbilityStatus which broadcasts the new status (along with gameplay tag and now additionally the ability level too) to the widgets.
-  - Now we want to add RichTexts to the Description blocks in the SpellMenu: we create a RichTextBlock and a RichTextStyle Data table: in this special kind of DT, you can add rows giving them a name and a specific style. Then, in the text of a RichTextBlock who uses this DT, you can make a given text the style you defined in the rows of the DT by enclosing the text in tags with the name of the row, example: <Damage> 13 </>, you will see 13 styled as the style you gave to row named "Damage" in the DT. So we create 3 virtual funtions in AuraGameplayAbility, GetDescription, GetNextLevelDescription and GetLockedDescription. These will have default values, but they will eventually get overriden and each ability will have its own description block. In ASC, we create GetDescriptionsByAbilityTag that essentially fills in 2 FStrings as out params with the ability description in case it finds it, otherwise the locked description in case it doesn't. We also modify our SpellGlobeSelectedDelegate to also broadcast the 2 descriptions, that we fill in by calling that function right before the broadcast in the various callback functions we have (essentially, when OnSpellPointsChangedDelegate and AbilityStatusChanged are broadcast).
-  - So in AuraProjectileSpell, we override the 2 getDescriptions and thanks to functions such as GetValueAtLevel (and our DamageTypes map), we can print out the correct damage value in each description (also, not yet implemented, but further levels on this spell will fire more than one fire bolt). Then, first of all we make a new class AuraFireBolt which will inherit from AuraProjectileSpell and override/define the description boxes. In the description boxes, we add other info such as cost and cooldown, retrieving them through API functions such as GetCostGameplayEffect and GetCooldownGameplayEffect, that we will call in some getter functions in our base class AuraGameplayAbility. Also, we add a helper function in AuraDamageGameplayAbility that loops in Damage types and per level, retrieves the damage.
-  - Small corner case fix: we want to be able to deselect an already-selected globe by clicking again on it, so we create GlobeDeselect() in SpellMenuWidgetController which simply changes Ability tag to None and Status to locked, and then re-triggers the broadcast of SpellGlobeSelectedDelegate just to signal that something changed, passing false as the buttons selected booleans and empty strings as description. In WBP_SpellGlobe_Button, this function will be called right after OnClicked, if and only if a "selected" boolean is actually true (a bool we set to true/false based respectively in our previously created Select/Deselect function). 
-  - Then we add some small animations to the EquippedAbilitiesRow on the menu, and in order to show the user the animations related to offensive/passive correctly, we need to add the AbilityType tag to the AbilityInfo struct data asset. Then we create two delegates that will broadcast the AbilityType up to the widget, one is for WaitForEquipDelegate and the other is the opposite, StopWaitingForEquipDelegate. These will be our signals to start or stop the animations that creates boxes around our equipped spell row to indicate to the user that he must select a slot where to equip the ability. As usual, we create a BlueprintCallable EquipButtonPressed() that will be called after OnClicked event of the Equip button, and what it does is it takes the ability type from the data asset and broadcasts it up to the wdigets. In BP indeed, we check if the tag matches and, based on a boolean that tells us if the ability type is offensive or not, we enable/disable the offensive/passive animation respectively.
-  - Now the biggest part, we want to equip the abilities: so starting from the start, we click on Equip and in EquipButtonPressed, if ability is already equipped, we save our selected slot (Slot = InputTag, which identifies in which slot to equip). Now we wait, then we have SpellRowGlobePressed (similar OnClicked trigger), we tell the ASC to trigger ServerEquippedAbility on the server, passing in the ability tag and the slot tag. What the server does, is first make sure that the ability is unlocked/equipped, and if it's true: first it will going to clear all the abilities with that slot (ClearAbilitiesOfSlot helper function on ASC class), then we clear the slot of the ability that we sent up (ClearSlot helper function on ASC class), add the slot (so add the tag to the spec's dynamica ability tags). If it has the unlocked status, we are going to remove that status and add the equipped one, finally call ClientEquipAbility, which will simply broadcast AbilityEquipped delegate, passing ability tag, status, slot and previous slot. The SpellMenuWidgetController is going to respond to it with OnAbilityEquipped, and it will save in local AbilityInfo structs first the LastSlotInfo (basically an empty ability), then the actual current Info, and broadcast both with the AbilityInfoDelegate, finally stopping the animations on the equipped row. To conclude, to make the overlay update too, we simply create the same exact version of OnAbilityEquipped on the OverlayWidgetController, as it is already subscribed to the same delegate and therefore broadcasts the same AbilityInfo. The rest is final polish, as adding a sound for when we assign an ability, also unbinding all the delegates of the controllers (after Event Destruct), and various bug fixing (mainly remembering to re-assigning each non-selected globe to None everytime we select one, so they can turn back to empty globes).
+## Spell Menu
+
+### Menu Overview & Purpose
+
+**Concept**: Spell Menu for spending Spell Points to unlock and upgrade abilities.
+
+**Functionality**:
+- Activate locked Offensive/Passive abilities (spending points)
+- Upgrade already-unlocked abilities (increase level/power)
+- Equipped abilities preview (overlay replica below)
+- Ability description text boxes (side panel)
+
+### Widget Construction
+
+**Component Hierarchy**:
+- Spell Globe Button (duplicated from level globe)
+- Offensive spell tree (matrix of globes, distinct hover/press rings)
+- Passive spell row (3 buttons)
+- Equipped spell row
+- Spell Menu Widget (base design from Attribute Menu)
+- Two ability description boxes (with scroll boxes)
+
+**Menu Integration**:
+- Openable via Spell Menu Button in Overlay
+- Open/close callbacks; `Set Input Mode UI Only` disables gameplay control while open
+- **Known Limitation**: Viewport alignment (right-side menu) remains resolution-dependent, not perfectly aligned
+
+### Widget Controller Refactoring
+
+**Code Reuse Strategy**: Move shared logic to base class rather than duplicating.
+
+**AuraWidgetController Base Class Additions**:
+- Shared member variables: AttributeSet, PlayerState, PlayerController, ASC
+- **Derived Getters**: Cast-once helpers (GetAuraPC, GetAuraPS, etc.)
+  - **Benefit**: Eliminates repetitive casting in derived controllers
+- Moved `OnInitializeStartupAbilities` algorithm to base (reused by both Overlay and SpellMenu controllers)
+
+**SpellMenuWidgetController**:
+- Reuses ability broadcast algorithm (bind callback → ForEach in ASC → broadcast ability info)
+- Constructed in AuraHUD like other controllers
+- Retrieved via AuraAbilitySystemLibrary getter, self-set in WBP_SpellMenu
+
+**Design Rationale**: Base class consolidation demonstrates DRY principle - shared controller functionality lives once, specialized behavior in derived classes.
+
+### Ability Status System
+
+**Concept**: Four states defining what actions are available per ability.
+
+**Status Types** (Gameplay Tags):
+- **Locked**: Not yet unlockable
+- **Eligible**: Can spend ≥1 spell point to unlock
+- **Unlocked**: Point spent, ability can be equipped
+- **Equipped**: Active in a slot (shows in equipped row)
+
+**Ability Type Tags**:
+- Offensive
+- Passive
+- None
+
+**GetStatusFromSpec()**: Retrieves current status tag from ability spec.
+
+**Critical Invariant**: Abilities have exactly one status tag at a time.
+- **Implementation**: Always remove old status before adding new one
+- **Why**: Multiple status tags would create ambiguous ability states
+
+**Startup Integration**: In `AddCharacterAbilities`, dynamically add Equipped tag to spec before `GiveAbility()`.
+
+### Displaying Ability Status in Spell Tree
+
+**Data Flow**:
+1. Add Status Tag and level requirement to AbilityInfo struct
+2. `BroadcastAbilityInfo()` includes status via `GetStatusFromSpec()`
+3. WBP_SpellGlobe_Button binds to AbilityInfo delegate
+4. On matching tag: Switch on status case, set icon/background per status
+
+**AbilityInfo Struct Growth**:
+- Level requirement (for unlock eligibility)
+- `TSubclassOf<UGameplayAbility>` (so ASC knows which ability class to grant dynamically)
+- Status tag
+
+**Data Location**: AbilityInfo lives on GameModeBase, retrieved via AuraAbilitySystemLibrary getter.
+
+### Level-Based Unlocking
+
+**UpdateAbilityStatuses (ASC)**:
+- Loop through AbilityInfo array
+- For each ability meeting level requirement:
+  1. Check if already granted via `GetSpecFromAbilityTag()` (skip if spec exists)
+  2. Verify level requirement met
+  3. Create spec, assign Eligible status tag
+  4. Grant via `GiveAbility()`
+
+**Trigger**: Called on level up (in `AddToPlayerLevel`, AuraCharacter).
+
+### Status Change Broadcasting
+
+**AbilityStatusChanged Delegate (ASC)**:
+- Parameters: AbilityTag, StatusTag (later: ability level)
+- Broadcast via **Client RPC** (`ClientUpdateAbilityStatus`)
+- Called after `GiveAbility()` in UpdateAbilityStatuses
+
+**Why Client RPC**: Ability granting happens server-side; RPC ensures client UI updates reflect server authority.
+
+**SpellMenuWidgetController Binding**: Retrieves AbilityInfo by tag, assigns status, forwards to widgets.
+
+### Globe Selection & Deselection
+
+**Selection System** (OffensiveSpellTree):
+- All globes bind to Event Dispatcher
+- Dispatcher called from globe's OnClicked, passes selected globe
+- **Select**: Play animation + sound
+- **Deselect**: Set render opacity to 0
+- Selecting one deselects all others in tree
+
+**Cross-Tree Deselection**:
+- Parent (SpellMenu) calls `DeselectAll` on OffensiveSpellTree when Passive dispatcher fires (and vice-versa)
+- **Purpose**: Only one ability selected across both trees
+
+**Deselect-on-Reclick**:
+- `GlobeDeselect()`: Set Ability tag to None, Status to Locked, re-broadcast (false booleans, empty descriptions)
+- Called after OnClicked only if "selected" boolean is true
+- **Purpose**: Clicking a selected globe deselects it
+
+### Button State Logic
+
+**Enable/Disable Rules** (Spend Point + Equip buttons):
+| Selected Globe Status | Spend Point Button | Equip Button |
+|----------------------|-------------------|--------------|
+| Equipped | Enabled | Enabled |
+| Locked | Disabled | Disabled |
+| Eligible | Enabled* | Disabled |
+| Unlocked | Enabled | Enabled |
+
+*Spend Point also requires SpellPoints > 0
+
+**Implementation**:
+- Delegate broadcasts two booleans (SpellButtonEnabled, EquipButtonEnabled)
+- `SpellGlobeSelected()` (triggered by globe OnClicked):
+  - Gets spec and status from ability tag
+  - Infers button states, broadcasts
+
+**Ability_None Tag**: "Null" gameplay tag for empty/deselected states.
+
+**Race Condition Fix**:
+- Re-check button states in SpellPointsChanged/AbilityStatusChanged lambdas
+- Store selected tags in private struct
+- **Why**: Handles corner case where leveling up with menu open didn't update button states
+
+### Spending Spell Points
+
+**SpendPointButtonPressed Flow**:
+1. Blueprint: Button OnClicked → `SpendPointButtonPressed()` (controller)
+2. Controller calls Server RPC on ASC
+3. **Server Logic**:
+   - Subtract 1 from SpellPoints
+   - If status Eligible: Remove Eligible, add Unlocked, set status Unlocked
+   - If status Equipped/Unlocked: Upgrade ability level (+1)
+   - Call `ClientUpdateAbilityStatus` (broadcasts status, tag, and level)
+
+**Design**: Single button handles both unlocking (Eligible→Unlocked) and upgrading (level increment) based on current status.
+
+### Rich Text Descriptions
+
+**Rich Text System**:
+- RichTextBlock widget + RichTextStyle Data Table
+- DT rows define named styles
+- Tag syntax in text applies styles: `<Damage>13</>` renders "13" with the "Damage" row's style
+
+**AuraGameplayAbility Virtual Functions**:
+- `GetDescription()`, `GetNextLevelDescription()`, `GetLockedDescription()`
+- Default implementations, overridden per-ability
+
+**GetDescriptionsByAbilityTag (ASC)**:
+- Fills two FStrings (out params): current description or locked description
+- SpellGlobeSelectedDelegate extended to broadcast both descriptions
+- Populated before broadcast in relevant callbacks
+
+**Ability-Specific Descriptions**:
+- `AuraFireBolt` class inherits from AuraProjectileSpell
+- Overrides descriptions using `GetValueAtLevel()` and DamageTypes map for accurate damage display
+- Includes cost/cooldown via `GetCostGameplayEffect()`/`GetCooldownGameplayEffect()` (wrapped in base class getters)
+- Helper in AuraDamageGameplayAbility loops DamageTypes for per-level damage retrieval
+
+**Design Benefit**: Descriptions dynamically reflect actual ability values at current/next level, keeping UI accurate as abilities scale.
+
+### Equipping Abilities
+
+**Equip Flow Preparation**:
+- Add AbilityType tag to AbilityInfo struct
+- Two delegates: `WaitForEquipDelegate`, `StopWaitingForEquipDelegate`
+  - Signal animations (boxes around equipped row) prompting slot selection
+- `EquipButtonPressed()`: Retrieves ability type, broadcasts to widgets
+  - Blueprint enables/disables offensive/passive animation based on type match
+
+**Equipping Execution**:
+1. Click Equip → `EquipButtonPressed` saves selected slot (Slot = InputTag)
+2. Wait for slot selection
+3. `SpellRowGlobePressed` → `ServerEquipAbility(AbilityTag, SlotTag)`
+4. **Server Logic**:
+   - Verify ability is Unlocked/Equipped
+   - `ClearAbilitiesOfSlot()`: Clear any ability in target slot
+   - `ClearSlot()`: Clear the ability's previous slot
+   - Add slot tag to spec's dynamic ability tags
+   - If Unlocked: Remove Unlocked, add Equipped status
+   - Call `ClientEquipAbility` (broadcasts AbilityEquipped: tag, status, slot, previous slot)
+
+**UI Update** (OnAbilityEquipped):
+- SpellMenuWidgetController saves LastSlotInfo (empty ability) then current Info
+- Broadcasts both via AbilityInfoDelegate (clears old slot, fills new)
+- Stops equipped row animations
+
+**Overlay Sync**: Identical `OnAbilityEquipped` on OverlayWidgetController (already subscribed to same delegate) updates the HUD spell globes.
+
+**Final Polish**:
+- Equip sound
+- Unbind controller delegates on Event Destruct
+- Bug fixes (re-assign non-selected globes to None on selection to reset empty globes)
+
+**Design Benefits**:
+- **Slot Management**: Clearing old slots prevents duplicate abilities across inputs
+- **Dual Update**: Single delegate updates both menu and HUD via shared subscription
+- **Status-Driven**: Equip logic respects ability status, preventing invalid equips
+- **Data-Driven Descriptions**: Rich text + virtual functions keep ability info accurate and styled
+
+---
+
