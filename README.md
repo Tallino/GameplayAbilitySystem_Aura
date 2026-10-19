@@ -2678,4 +2678,5 @@ if (LevelUpInformation.Num() <= Level) return Level;
 
 - Combat Tricks
   - So now we want to implement debuffs, and we want a debuff for each ability type. So first of all, we remove the TMap of the DamageType per ability as we want only one damageType per ability. Spells now will only have one scalable float and one damage type. Then we add debuff tags in our AuraGameplayTags and a DamageTypesToDebuffs map, which we fill accordingly. Finally, we add debuff parameters such as Chance, Damage, Frequency and Duration, and add the corresponding tags in the usual singleton.
+  - Now we want an ability system library utility function to take all these params and apply them: we create a struct in AuraAbilityTypes that contains all the info we need, a builder function in AuraDamageGameplayAbility that simply fills in that struct, and then the actual utility function that takes the struct in input, creates a spec based on the params, assign tags-value pairs for set by caller magnitudes and finally applies the spec to target.
   - 
