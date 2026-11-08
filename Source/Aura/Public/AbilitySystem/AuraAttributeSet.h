@@ -240,6 +240,9 @@ public:
 	void OnRep_PhysicalResistance(const FGameplayAttributeData& OldPhysicalResistance) const;
 	
 private:
+	void HandleIncomingDamage(const FEffectPropertiesEnhanced& Props);
+	void HandleIncomingXP(const FEffectPropertiesEnhanced& Props);
+	void Debuff(const FEffectPropertiesEnhanced& Props);
 	void SetEffectProperties(const FGameplayEffectModCallbackData& Data, FEffectPropertiesEnhanced& Props) const;
 	void ShowFloatingText(const FEffectPropertiesEnhanced& Props, float Damage, bool bBlockedHit, bool bCriticalHit) const;
 	void SendXPEvent(const FEffectPropertiesEnhanced& Props);
