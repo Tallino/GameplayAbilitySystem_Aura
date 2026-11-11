@@ -2676,13 +2676,136 @@ if (LevelUpInformation.Num() <= Level) return Level;
 
 ---
 
-- Combat Tricks
-  - So now we want to implement debuffs, and we want a debuff for each ability type. So first of all, we remove the TMap of the DamageType per ability as we want only one damageType per ability. Spells now will only have one scalable float and one damage type. Then we add debuff tags in our AuraGameplayTags and a DamageTypesToDebuffs map, which we fill accordingly. Finally, we add debuff parameters such as Chance, Damage, Frequency and Duration, and add the corresponding tags in the usual singleton.
-  - Now we want an ability system library utility function to take all these params and apply them: we create a struct in AuraAbilityTypes that contains all the info we need, a builder function in AuraDamageGameplayAbility that simply fills in that struct, and then the actual utility function that takes the struct in input, creates a spec based on the params, assign tags-value pairs for set by caller magnitudes and finally applies the spec to target. Finally, we want to use the utility function (called ApplyDamageEffect): AuraProjectile will have its own struct, and in AuraProjectileSpell we build the struct from defaults and assign it the AuraProjectile member struct. And in AuraProjectile, we call ApplyDamageEffect where we used to create the spec and apply it (so, in OnSphereOverlap).
-  - In ExecCalcDamage, in Execute_Implementation, we create a function called DetermineDebuff: it loops through the DamageTypesToDebuffs map, and for each damage type (in our new design, it will be only one for each spell), it calls GetSetByCallerMagnitude both for the DamageType (so getting the Damage float), and for Debuff_Chance (so getting the Chance float): based on the chance, taking also in consideration the resistance of the enemy, it calculates a bool to check if we will actually trigger a debuff.
-  - Also, we want these debuff traits to be present in our custom GameplayEffectContext class, declared in AuraAbilityTypes. So we do the same kind of bit serialization game we did at the time with the other trait, also we create getters/setters, that we will then call from other getters/setters we create in our AuraAbilitySystemLibrary, that we will ultimately use. So now we have easy-to-use ability system library functions and all of this will be very useful as we can pass this info along in the effect context and use it later in the damage pipeline.
-  - Indeed, in ExecCalc we set the IsSuccessful debuff bool to true and fundamentally just take all the params (damage, frequency etc.) from the SetByCallerMagnitude and set them to the ContextHandle (thanks to other helper functions in AbilitySystemLibrary). Finally, in AuraAttributeSet, in PostGameplayEffectExecute, we self-apply the debuff. How do we do it? With a dynamic GE, in cpp. So we check if the context contains a successful debuff, and in case, we create a GE and give it damage type, damage etc. taken from the Source Properties of the GameplayEffect. Then we create another debuff GE that will actually be self applied by the target.
-  - So now we want to add a Niagara component to the debuff, but we want to be able to customize (activating/deactivating it when we want), so we create a cpp class for it: in the BeginPlay() of the niagara class, we bind to the ASC (already existing) delegate called RegisterGameplayTagEvent, which will in turn call our DebuffTagChanged: of NewCount of the tag is bigger than 0, means we activate, else we deactivate. This will automatically broadcast in case of tag change. But we also create a scenario in case the ASC is not initialized yet, meaning we use a delegate in the CombatInterface to warn us whenever ASC is initialized. So in child classes, we broadcast it after InitAbilityActorInfo etc. This will in turn still bind the same statement as before, so RegisterGameplayTagEvent etc. Finally, we also create a delegate for warning of the death of the character, broadcasting it when we die. In turn, this will obviously deactivate the niagara. Also in AuraCharacterBase constructor, we build the Niagara component itself and assign the debuff_burn gameplay tag to its member variable DebuffTag.
-  - Finally, as an extra combat trick, we want to add death impulse effect that applies when an enemy dies (so when damage is fatal): so we add the magnitude to both the AuraDamageGameplayAbility and in the AuraAbilityTypes struct. We want to send along a vector representing the direction into which to knockback the enemy, and we would take that vector at impact time (OnSphereOverlap in AuraProjectile class). How to send it along? In our custom GameplayEffectContext. So we add it into our usual bit serialization game of AuraAbilityTypes + our custom struct. Then, at impact time, we take the GetActorForwardVector(), scale it by the magnitude and assign to the DamageParams struct. Finally, in the blueprint system library, we call SetDeathImpulse to take the impulse vector from the struct and give it to the context. Last step will be, in the fatal scenario of AuraAttributeSet, handle the death impulse using this vector. We do this by calling AddImpulse (part of UE framework) in Die() -> HandleMultiDeath in AuraCharacterBase, passing through the vector as a param (had to modify CombatInterface virtual function).
-  - Now we want to add a knockback effect (launch character in the air) to apply (based on a knockback chance and a knockback magnitude of the damage ability) when the damage is NOT fatal: we put knockback chance/vector/magnitude in the full pipeline as always (DamageGameplayAbility, AbilityTypes, getter/setters in blueprint library etc.). In AuraProjectile we calculate if there is a chance of knockback, and if yes, the KnockbackForce. We pass this info through the DamageEffectParams and assigning it to the damage effect context, and the final magic happens in AttributeSet in the non-fatal part of the HandleIncomingDamage function: we take back the force from the context and apply it with LaunchCharacter(). Finally, since this works only for projectiles, but we want to make melee goblins make us (Aura) knockback too, we modify the DamageEffectParams builder to be blueprint pure and call ApplyDamagEffect in the event graph of GA_MeleeAttack (which was going through CauseDamage before, who didn't take any info from the context).
- 
+## Combat Tricks
+
+### Debuff System Design
+
+**Design Simplification**: One damage type per ability.
+- **Removed**: `TMap<DamageType, float>` per ability
+- **Replaced with**: Single scalable float + single damage type
+- **Rationale**: Simpler model where each spell has one elemental identity, enabling clean damage-type-to-debuff mapping
+
+**Debuff Infrastructure**:
+- Debuff tags in AuraGameplayTags
+- `DamageTypesToDebuffs` map (damage type → debuff)
+- Debuff parameters: Chance, Damage, Frequency, Duration (with tags)
+
+### Centralized Damage Application
+
+**FDamageEffectParams Struct** (AuraAbilityTypes): Contains all damage/debuff info.
+
+**Builder + Utility Pattern**:
+- Builder function in AuraDamageGameplayAbility fills the struct
+- `ApplyDamageEffect()` utility (AbilitySystemLibrary):
+  - Takes struct
+  - Creates spec from params
+  - Assigns tag-value pairs for SetByCaller magnitudes
+  - Applies spec to target
+
+**Integration**:
+- AuraProjectile holds its own params struct
+- AuraProjectileSpell builds struct from defaults, assigns to projectile
+- AuraProjectile calls `ApplyDamageEffect()` in OnSphereOverlap (replacing manual spec creation)
+
+**Design Benefit**: Single application point for all damage effects - adding new effect parameters (debuffs, impulses) extends one struct rather than scattered code.
+
+### Debuff Determination
+
+**DetermineDebuff (ExecCalc_Damage)**:
+- Loop through `DamageTypesToDebuffs` map (one entry per spell now)
+- For each: `GetSetByCallerMagnitude` for both DamageType (damage) and Debuff_Chance
+- Calculate success bool considering chance AND target resistance
+- **Result**: Probabilistic debuff application modified by defensive stats
+
+### Debuff Data in Gameplay Effect Context
+
+**Context Extension**: Add debuff traits to custom GameplayEffectContext.
+- Same bit-serialization pattern as critical/block hits
+- Getters/setters wrapped in AbilitySystemLibrary functions
+
+**Why Context Storage**: Debuff info travels through the damage pipeline in the context, available at later stages (PostGameplayEffectExecute) for application.
+
+**Pipeline Flow**:
+1. ExecCalc sets IsSuccessfulDebuff = true
+2. Takes all params (damage, frequency, duration) from SetByCaller
+3. Stores in ContextHandle via helpers
+4. AuraAttributeSet PostGameplayEffectExecute reads context, self-applies debuff
+
+### Dynamic Debuff Gameplay Effect
+
+**Runtime GE Creation** (C++):
+- Check context for successful debuff
+- Create GE dynamically with damage type, damage, frequency, duration from Source Properties
+- Target self-applies the debuff GE
+
+**Why Dynamic GE**: Debuff parameters vary per ability/calculation - a runtime-constructed GE adapts to any debuff configuration without pre-made assets per combination.
+
+### Debuff Niagara Component
+
+**Custom Niagara Class**:
+- In BeginPlay: Bind to ASC's `RegisterGameplayTagEvent` delegate
+- Delegate calls `DebuffTagChanged`:
+  - NewCount > 0 → Activate effect
+  - NewCount == 0 → Deactivate effect
+- **Automatic**: Tag count changes auto-broadcast activation state
+
+**ASC Initialization Edge Case**:
+- **Problem**: ASC may not be initialized when Niagara needs to bind
+- **Solution**: CombatInterface delegate signals ASC initialization
+- Child classes broadcast after `InitAbilityActorInfo`
+- Niagara binds `RegisterGameplayTagEvent` once signaled
+
+**Death Handling**:
+- CombatInterface death delegate broadcasts on death
+- Deactivates Niagara effect
+
+**Setup** (AuraCharacterBase constructor):
+- Build Niagara component
+- Assign `Debuff.Burn` tag to `DebuffTag` member
+
+**Design Pattern**: Delegate-based initialization/death signaling decouples Niagara lifecycle from character implementation, handling timing edge cases gracefully.
+
+### Death Impulse Effect
+
+**Concept**: Knockback force applied when damage is fatal.
+
+**Pipeline Integration**:
+- Add impulse magnitude to AuraDamageGameplayAbility and FDamageEffectParams
+- At impact (OnSphereOverlap, AuraProjectile):
+  - `GetActorForwardVector()` × magnitude
+  - Assign to DamageParams struct
+- Send via custom GameplayEffectContext (bit serialization)
+- `SetDeathImpulse()` (BlueprintLibrary) stores vector in context
+
+**Application** (AuraAttributeSet fatal scenario):
+- Read impulse vector from context
+- `Die() → HandleMultiDeath` in AuraCharacterBase
+- Call `AddImpulse()` (UE physics) with vector
+- Modified CombatInterface virtual function to pass vector
+
+### Knockback Effect
+
+**Concept**: Launch character airborne on NON-fatal damage (chance-based).
+
+**Pipeline** (same pattern):
+- Knockback chance/vector/magnitude through DamageGameplayAbility, AbilityTypes, BlueprintLibrary getters/setters
+- AuraProjectile calculates knockback chance and force
+- Passes through DamageEffectParams → context
+
+**Application** (AuraAttributeSet non-fatal HandleIncomingDamage):
+- Retrieve force from context
+- `LaunchCharacter()` with force
+
+**Melee Knockback Extension**:
+- **Problem**: Knockback only worked for projectiles (CauseDamage didn't read context)
+- **Solution**: Make DamageEffectParams builder Blueprint Pure
+- Call `ApplyDamageEffect()` in GA_MeleeAttack event graph (replacing CauseDamage)
+- **Result**: Melee goblins can knockback Aura too
+
+**Design Benefits**:
+- **Unified Pipeline**: Death impulse and knockback reuse the same context-passing architecture
+- **Extensible**: Each new combat effect extends the established params struct + context pattern
+- **Physics Integration**: Leverages UE's AddImpulse/LaunchCharacter for satisfying physical feedback
+- **Consistent Application**: Melee and ranged attacks share the same effect application path
+
+---
