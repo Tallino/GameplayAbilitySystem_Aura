@@ -8,6 +8,7 @@
 #include "AuraGameplayTags.h"
 #include "Net/UnrealNetwork.h"
 #include "GameplayEffectExtension.h"
+#include "AbilitySystem/AuraAbilitySystemComponent.h"
 #include "AbilitySystem/AuraAbilitySystemLibrary.h"
 #include "GameFramework/Character.h"
 #include "Interaction/CombatInterface.h"
@@ -182,12 +183,10 @@ void UAuraAttributeSet::HandleIncomingDamage(const FEffectPropertiesEnhanced& Pr
 		const bool bFatal = NewHealth <= 0.f;
 		if (bFatal)
 		{
-			//TODO: Use Death Impulse!
-			
 			ICombatInterface* CombatInterface = Cast<ICombatInterface>(Props.TargetProperties->AvatarActor);
 			if (CombatInterface)
 			{
-				CombatInterface->Die();
+				CombatInterface->Die(UAuraAbilitySystemLibrary::GetDeathImpulse(Props.SourceProperties->EffectContextHandle));
 			}
 			SendXPEvent(Props);
 		}
