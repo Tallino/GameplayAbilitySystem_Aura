@@ -2809,3 +2809,7 @@ if (LevelUpInformation.Num() <= Level) return Level;
 - **Consistent Application**: Melee and ranged attacks share the same effect application path
 
 ---
+
+- What a Shock
+  - So now we want to make some spells do more stuff with higher levels, in particular we are gonna make the firebolt shoot more bolts when its level 2 or above. To begin, we need to create the spread in AuraFireBolt.cpp, similar to how we did for the demon spawn: we create some spreads rotating around the Up vector, with the number of projectiles equal to the player level.
+  - 
