@@ -2811,5 +2811,5 @@ if (LevelUpInformation.Num() <= Level) return Level;
 ---
 
 - What a Shock
-  - So now we want to make some spells do more stuff with higher levels, in particular we are gonna make the firebolt shoot more bolts when its level 2 or above. To begin, we need to create the spread in AuraFireBolt.cpp, similar to how we did for the demon spawn: we create some spreads rotating around the Up vector, with the number of projectiles equal to the player level.
+  - So now we want to make some spells do more stuff with higher levels, in particular we are gonna make the firebolt shoot more bolts when its level 2 or above. To begin, we need to create the spread in AuraFireBolt.cpp, similar to how we did for the demon spawn: we create some spreads rotating around the Up vector, with the number of projectiles equal to the player level. Only difference with the demons is that this time we do const float DeltaSpread = ProjectileSpread / (NumProjectiles - 1) instead of const float DeltaSpread = ProjectileSpread / NumProjectiles; (please explain here why). In general, to avoid repeating, we put these algorithms in our blueprint library.
   - 
