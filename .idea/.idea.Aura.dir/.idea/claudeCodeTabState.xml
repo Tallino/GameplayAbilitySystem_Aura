@@ -6,10 +6,14 @@
         <entry key="0">
           <value>
             <TabSessionState>
+              <option name="projectPath" value="C:\Users\gdane\Documents\Unreal Projects\Aura" />
               <option name="provider" value="claude" />
-              <option name="cwd" value="C:\Users\gdane\Documents\Unreal Projects\GameplayAbilitySystem_Aura" />
+              <option name="cwd" value="C:\Users\gdane\Documents\Unreal Projects\Aura" />
               <option name="model" value="claude-sonnet-5" />
               <option name="permissionMode" value="default" />
+              <option name="claudeSupplierId" value="__session_supplier_unavailable__" />
+              <option name="codexSupplierId" value="__session_supplier_unavailable__" />
+              <option name="ompApprovalMode" value="" />
             </TabSessionState>
           </value>
         </entry>
